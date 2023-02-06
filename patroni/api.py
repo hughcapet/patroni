@@ -403,6 +403,20 @@ class RestApiHandler(BaseHTTPRequestHandler):
             self.server.patroni.api_sigterm()
         self._write_response(202, 'shutdown scheduled')
 
+    @check_access
+    def do_POST_fault_point(self):
+        """Only for behave testing"""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+
+        request = self._read_json_content()
+        if request and isinstance(request, dict):
+            self.server.patroni.ha.fault_injector.set_fault_point()
+            self._write_response(200, 'OK')
+        else:
+            self.send_error(400)
+
     @staticmethod
     def parse_schedule(schedule, action):
         """ parses the given schedule and validates at """

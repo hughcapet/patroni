@@ -149,6 +149,7 @@ class PatroniController(AbstractController):
             env['PATRONI_KUBERNETES_POD_IP'] = '10.0.0.' + self._name[-1]
         if os.name == 'nt':
             env['BEHAVE_DEBUG'] = 'true'
+        env['ENABLE_FAULT_INJECTOR'] = 'true'
         patroni = subprocess.Popen([sys.executable, '-m', 'coverage', 'run',
                                    '--source=patroni', '-p', 'patroni.py', self._config], env=env,
                                    stdout=self._log, stderr=subprocess.STDOUT, cwd=self._work_directory)
