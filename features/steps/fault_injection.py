@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import json
 
 from behave import step

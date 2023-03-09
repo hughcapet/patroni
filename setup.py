@@ -42,6 +42,7 @@ CLASSIFIERS = [
     'Operating System :: Microsoft :: Windows',
     'Programming Language :: Python',
     'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.6',
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9',
@@ -93,7 +94,7 @@ class Flake8(_Command):
         from flake8.main.cli import main
 
         logging.getLogger().setLevel(logging.ERROR)
-        main(self.targets())
+        raise SystemExit(main(self.targets()))
 
 
 class PyTest(_Command):
