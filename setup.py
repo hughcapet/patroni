@@ -109,7 +109,7 @@ class PyTest(_Command):
 
         args = ['--verbose', 'tests', '--doctest-modules', MAIN_PACKAGE] +\
             ['-s' if logging.getLogger().getEffectiveLevel() < logging.WARNING else '--capture=fd'] +\
-            ['--cov', MAIN_PACKAGE, '--cov-report', 'term-missing', '--cov-report', 'xml']
+            ['--cov', MAIN_PACKAGE, '--cov', 'fault_injector', '--cov-report', 'term-missing', '--cov-report', 'xml']
 
         errno = pytest.main(args=args)
         sys.exit(errno)
