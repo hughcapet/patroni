@@ -40,6 +40,19 @@ class TestFaultInjector(unittest.TestCase):
             self.assertIsNone(self.fi.remove_fault_point('non_existent_fault_point'))
             mock_logger_info.assert_not_called()
 
+    def test_get_fault_points(self):
+        self.assertEqual([], self.fi.get_fault_points())
+
+        self.fi.set_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
+        self.assertEqual([{
+                'fault_name': 'inject_exception',
+                'fault_type': FAULT_TYPES.EXCEPTION,
+                'start_from': 1,
+                'end_after': None,
+                'sleep_time': None,
+                'hits': 0
+            }], self.fi.get_fault_points())
+
     def test_inject_fault_if_set(self):
         # Type EXCEPTION
 

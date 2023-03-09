@@ -2,7 +2,7 @@ import logging
 import time
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,19 @@ class FaultInjector(object):
                 fault_point = fp
                 break
         return fault_point
+
+    def get_fault_points(self) -> List[dict]:
+        points = []
+        for p in self._fault_points:
+            points.append({
+                'fault_name': p.name,
+                'fault_type': p.type,
+                'start_from': p.start_from,
+                'end_after': p.end_after,
+                'sleep_time': p.sleep_time,
+                'hits': p.hits
+            })
+        return points
 
     def remove_fault_point(self, fault_name: str) -> None:
         """Deactivate fault point"""

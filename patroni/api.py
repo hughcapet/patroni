@@ -407,16 +407,18 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
     @check_access
     def do_POST_fault_point(self):
-        """Only for behave testing"""
+        """Activate a fault point. Only for behave testing"""
         if not os.getenv('ENABLE_FAULT_INJECTOR'):
             self._write_response(403, 'Forbidden')
             return
 
         request = self._read_json_content()
         try:
-            if request:
-                self.server.patroni.ha.fault_injector.set_fault_point(request['fault_name'],
-                                                                      FAULT_TYPES(request['fault_type']),
+            fault_name = request.get('fault_name')
+            fault_type = request.get('fault_type')
+            if request and fault_name and fault_type:
+                self.server.patroni.ha.fault_injector.set_fault_point(fault_name,
+                                                                      FAULT_TYPES(fault_type),
                                                                       request.get('start_from'),
                                                                       request.get('end_after'),
                                                                       request.get('sleep_time'))
@@ -425,6 +427,13 @@ class RestApiHandler(BaseHTTPRequestHandler):
                 self.send_error(400)
         except ValueError:
             self._write_response(409, f"Fault point {request['fault_name']} is already set")
+
+    def do_GET_fault_point(self):
+        """Get all currently activated points. Only for behave testing."""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+        self._write_json_response(200, self.server.patroni.ha.fault_injector.get_fault_points())
 
     @staticmethod
     def parse_schedule(schedule, action):

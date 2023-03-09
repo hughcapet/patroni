@@ -65,11 +65,14 @@ class MockFaultPoint(object):
 class MockFaultInjector(object):
 
     def set_fault_point(*args):
-        if args[2] != 'test_fault_type':
+        if args[2] != MockFaultPoint.type:
             raise ValueError
 
     def _get_fault_point_by_name(*args):
         return MockFaultPoint()
+
+    def get_fault_points(self):
+        return [{'fault_name': MockFaultPoint.name, 'fault_type': MockFaultPoint.type}]
 
     def remove_fault_point(*args):
         pass
@@ -607,13 +610,18 @@ class TestRestApiHandler(unittest.TestCase):
         post = 'POST /fault_point HTTP/1.0' + self._authorization + '\nContent-Length: '
         MockRestApiServer(RestApiHandler, post + '0\n\n')
 
-        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}), \
-             patch.object(MockHa, 'restart', Mock(side_effect=Exception)):
-            MockRestApiServer(RestApiHandler, post + '0\n\n')
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            MockRestApiServer(RestApiHandler, post + '7\n\n{"":""}')
             MockRestApiServer(RestApiHandler, post +
                               '52\n\n{"fault_name":"test","fault_type":"test_fault_type"}')
             MockRestApiServer(RestApiHandler, post +
                               '59\n\n{"fault_name":"test","fault_type":"wrong_fault_type"}')
+
+    def test_do_GET_fault_point(self):
+        self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /fault_point'))
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /fault_point'))
 
 
 class TestRestApiServer(unittest.TestCase):
