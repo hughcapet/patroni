@@ -17,7 +17,7 @@ class TestFaultInjector(unittest.TestCase):
 
         with patch('fault_injector.logger.info') as mock_logger_info:
             self.fi.set_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
-            self.assertEqual(('Activated fault point %s of type %s', 'inject_exception', FAULT_TYPES.EXCEPTION),
+            self.assertEqual(('Activated fault point %s of type %r', 'inject_exception', FAULT_TYPES.EXCEPTION),
                              mock_logger_info.call_args[0])
 
         with self.assertRaises(ValueError) as context:
@@ -32,7 +32,7 @@ class TestFaultInjector(unittest.TestCase):
         with patch('fault_injector.logger.info') as mock_logger_info:
             self.fi.remove_fault_point('inject_exception')
             mock_logger_info.assert_called_once()
-            self.assertEqual(('Deactivated fault point %s of type %s', 'inject_exception', FAULT_TYPES.EXCEPTION),
+            self.assertEqual(('Deactivated fault point %s of type %r', 'inject_exception', FAULT_TYPES.EXCEPTION),
                              mock_logger_info.call_args[0])
 
             mock_logger_info.reset_mock()

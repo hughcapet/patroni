@@ -61,7 +61,7 @@ class FaultInjector(object):
 
         fault_point = FaultPoint(fault_name, fault_type, start_from, end_after, sleep_time)
         self._fault_points.append(fault_point)
-        logger.info('Activated fault point %s of type %s', fault_name, fault_type)
+        logger.info('Activated fault point %s of type %r', fault_name, fault_type)
 
     def _get_fault_point_by_name(self, fault_name: str) -> FaultPoint:
         fault_point = None
@@ -90,7 +90,7 @@ class FaultInjector(object):
         if not fault_point:
             return
         self._fault_points.remove(fault_point)
-        logger.info('Deactivated fault point %s of type %s', fault_name, fault_point.type)
+        logger.info('Deactivated fault point %s of type %r', fault_name, fault_point.type)
 
     def inject_fault_if_set(self, fault_name: str) -> None:
         # inject fault only if the required point has been activated
@@ -108,7 +108,7 @@ class FaultInjector(object):
             self.remove_fault_point(fault_point.name)
             return
 
-        logger.info('Fault %s of type %s triggered.', fault_point.name, fault_point.type)
+        logger.info('Fault %s of type %r triggered.', fault_point.name, fault_point.type)
 
         # do the actual work based on the fault type
         if fault_point.type == FAULT_TYPES.EXCEPTION:
