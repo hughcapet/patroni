@@ -15,7 +15,7 @@ from threading import RLock
 from . import psycopg
 from .async_executor import AsyncExecutor, CriticalTask
 from .exceptions import DCSError, PostgresConnectionException, PatroniFatalException
-from .fault_injector.inject_fault import FaultInjector
+from fault_injector import FaultInjector
 from .postgresql import ACTION_ON_START, ACTION_ON_ROLE_CHANGE
 from .postgresql.misc import postgres_version_to_int
 from .postgresql.rewind import Rewind

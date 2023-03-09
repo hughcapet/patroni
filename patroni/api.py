@@ -19,6 +19,7 @@ from threading import Thread
 
 from . import psycopg
 from .exceptions import PostgresConnectionException, PostgresException
+from fault_injector import FAULT_TYPES
 from .postgresql.misc import postgres_version_to_int
 from .utils import deep_compare, enable_keepalive, parse_bool, patch_config, Retry, \
     RetryFailedError, parse_int, split_host_port, tzutc, uri, cluster_as_json
@@ -387,6 +388,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
     @check_access
     def do_POST_failsafe(self):
         if self.server.patroni.ha.is_failsafe_mode():
+            self.server.patroni.ha.fault_injector.inject_fault_if_set('failsafe_network_split')
             request = self._read_json_content()
             if request:
                 message = self.server.patroni.ha.update_failsafe(request) or 'Accepted'
@@ -411,11 +413,18 @@ class RestApiHandler(BaseHTTPRequestHandler):
             return
 
         request = self._read_json_content()
-        if request and isinstance(request, dict):
-            self.server.patroni.ha.fault_injector.set_fault_point()
-            self._write_response(200, 'OK')
-        else:
-            self.send_error(400)
+        try:
+            if request:
+                self.server.patroni.ha.fault_injector.set_fault_point(request['fault_name'],
+                                                                      FAULT_TYPES(request['fault_type']),
+                                                                      request.get('start_from'),
+                                                                      request.get('end_after'),
+                                                                      request.get('sleep_time'))
+                self._write_response(200, 'OK')
+            else:
+                self.send_error(400)
+        except ValueError:
+            self._write_response(409, f"Fault point {request['fault_name']} is already set")
 
     @staticmethod
     def parse_schedule(schedule, action):

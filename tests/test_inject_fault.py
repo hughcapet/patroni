@@ -2,7 +2,7 @@ import unittest
 
 from mock import patch
 
-from patroni.fault_injector.inject_fault import FaultInjector, FAULT_TYPES
+from fault_injector import FaultInjector, FAULT_TYPES
 
 
 class TestFaultInjector(unittest.TestCase):
@@ -15,7 +15,7 @@ class TestFaultInjector(unittest.TestCase):
             self.fi.set_fault_point('inject_wrong_type', 'wrong_type')
         self.assertEqual(context.exception.args[0], 'Invalid fault point type')
 
-        with patch('patroni.fault_injector.inject_fault.logger.info') as mock_logger_info:
+        with patch('fault_injector.logger.info') as mock_logger_info:
             self.fi.set_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
             self.assertEqual(('Activated fault point %s of type %s', 'inject_exception', FAULT_TYPES.EXCEPTION),
                              mock_logger_info.call_args[0])
@@ -29,7 +29,7 @@ class TestFaultInjector(unittest.TestCase):
     def test_remove_fault_point(self):
         self.fi.set_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
 
-        with patch('patroni.fault_injector.inject_fault.logger.info') as mock_logger_info:
+        with patch('fault_injector.logger.info') as mock_logger_info:
             self.fi.remove_fault_point('inject_exception')
             mock_logger_info.assert_called_once()
             self.assertEqual(('Deactivated fault point %s of type %s', 'inject_exception', FAULT_TYPES.EXCEPTION),

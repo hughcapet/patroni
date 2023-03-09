@@ -1,25 +1,27 @@
-#!/usr/bin/env python
-
 import logging
 import time
 
 from enum import Enum
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-class FAULT_TYPES(Enum):
-    EXCEPTION = 1
-    SLEEP = 2
+class FAULT_TYPES(str, Enum):
+    EXCEPTION = 'exception'
+    SLEEP = 'string'
+
+    def __repr__(self):
+        return self.value
 
 
 class FaultPoint(object):
     # TODO: class docstring
     def __init__(self, name: str,
                  fault_type: FAULT_TYPES,
-                 start_from: int = 1,
-                 end_after: int = None,
-                 sleep_time: float = None) -> None:
+                 start_from: Optional[int] = 1,
+                 end_after: Optional[int] = None,
+                 sleep_time: Optional[float] = None) -> None:
         if not isinstance(fault_type, FAULT_TYPES):
             raise TypeError('Invalid fault point type')
         if fault_type == FAULT_TYPES.SLEEP and not sleep_time:
@@ -42,11 +44,17 @@ class FaultInjector(object):
     def set_fault_point(self,
                         fault_name: str,
                         fault_type: FAULT_TYPES,
-                        start_from: int = 1,
-                        end_after: int = None,
-                        sleep_time: float = None) -> None:
+                        start_from: Optional[int] = 1,
+                        end_after: Optional[int] = None,
+                        sleep_time: Optional[float] = None) -> None:
         """Activate fault point (called by API).
-        Every named fault point can be activated only with a single fault type."""
+        Every named fault point can be activated only with a single fault type.
+
+        :param fault_name
+        :param fault_type
+        :param start_from: inject fault starting from the Nth hit
+        :param end_after: stop fault injection after the Nth hit
+        :param sleep_time: seconds to sleep if fault_type == FAULT_TYPES.SLEEP"""
         for fp in self._fault_points:
             if fp.name == fault_name:
                 raise ValueError('Fault point %s is already set', fault_name)

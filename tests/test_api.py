@@ -57,10 +57,32 @@ class MockWatchdog(object):
     is_healthy = False
 
 
+class MockFaultPoint(object):
+    name = 'test_point'
+    type = 'test_fault_type'
+
+
+class MockFaultInjector(object):
+
+    def set_fault_point(*args):
+        if args[2] != 'test_fault_type':
+            raise ValueError
+
+    def _get_fault_point_by_name(*args):
+        return MockFaultPoint()
+
+    def remove_fault_point(*args):
+        pass
+
+    def inject_fault_if_set(*args):
+        pass
+
+
 class MockHa(object):
 
     state_handler = MockPostgresql()
     watchdog = MockWatchdog()
+    fault_injector = MockFaultInjector()
 
     @staticmethod
     def update_failsafe(*args):
@@ -580,6 +602,18 @@ class TestRestApiHandler(unittest.TestCase):
         post = 'POST /citus HTTP/1.0' + self._authorization + '\nContent-Length: '
         MockRestApiServer(RestApiHandler, post + '0\n\n')
         MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
+
+    def test_do_POST_fault_point(self):
+        post = 'POST /fault_point HTTP/1.0' + self._authorization + '\nContent-Length: '
+        MockRestApiServer(RestApiHandler, post + '0\n\n')
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}), \
+             patch.object(MockHa, 'restart', Mock(side_effect=Exception)):
+            MockRestApiServer(RestApiHandler, post + '0\n\n')
+            MockRestApiServer(RestApiHandler, post +
+                              '52\n\n{"fault_name":"test","fault_type":"test_fault_type"}')
+            MockRestApiServer(RestApiHandler, post +
+                              '59\n\n{"fault_name":"test","fault_type":"wrong_fault_type"}')
 
 
 class TestRestApiServer(unittest.TestCase):

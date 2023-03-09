@@ -83,3 +83,9 @@ Feature: dcs failsafe mode
     Then postgres1 role is the primary after 10 seconds
     And postgres0 role is the replica after 2 seconds
     And postgres2 role is the replica after 2 seconds
+
+  @dcs-failsafe
+  Scenario: check primary is demoted when one replica is not reachable while DCS is down
+    Given I inject fault 'failsafe_network_split'
+    And I sleep for 2 seconds
+    Then postgres1 role is the replica after 12 seconds
