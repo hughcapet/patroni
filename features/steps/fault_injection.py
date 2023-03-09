@@ -8,7 +8,7 @@ from fault_injector import FAULT_TYPES
 
 def check_fault_injected(context, fault_name):
     assert context.status_code == 200
-    do_get(context, 'http://127.0.0.1:8008/fault_point')
+    do_get(context, 'http://127.0.0.1:8008/inject_fault')
     assert context.status_code == 200, 'Fault injection request failed'
     set_point = next(i for i in context.response if i['fault_name'] == fault_name)
     assert set_point, 'Set fault point is not present in response'
@@ -22,7 +22,7 @@ def set_fault_point(context, fault_name, fault_type=FAULT_TYPES.EXCEPTION, start
             'fault_type': fault_type,
             'start_from': start_from,
             'end_after': end_after}
-    do_request(context, 'POST', 'http://127.0.0.1:8008/fault_point', json.dumps(data))
+    do_request(context, 'POST', 'http://127.0.0.1:8008/inject_fault', json.dumps(data))
     check_fault_injected(context, fault_name)
 
 
@@ -35,5 +35,5 @@ def set_fault_point_sleep(context, fault_name, sleep_time, start_from=1, end_aft
             'start_from': start_from,
             'end_after': end_after,
             'sleep_time': sleep_time}
-    do_request(context, 'POST', 'http://127.0.0.1:8008/fault_point', json.dumps(data))
+    do_request(context, 'POST', 'http://127.0.0.1:8008/inject_fault', json.dumps(data))
     check_fault_injected(context, fault_name)

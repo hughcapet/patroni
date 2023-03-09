@@ -606,8 +606,8 @@ class TestRestApiHandler(unittest.TestCase):
         MockRestApiServer(RestApiHandler, post + '0\n\n')
         MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
 
-    def test_do_POST_fault_point(self):
-        post = 'POST /fault_point HTTP/1.0' + self._authorization + '\nContent-Length: '
+    def test_do_POST_inject_fault(self):
+        post = 'POST /inject_fault HTTP/1.0' + self._authorization + '\nContent-Length: '
         MockRestApiServer(RestApiHandler, post + '0\n\n')
 
         with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
@@ -617,11 +617,11 @@ class TestRestApiHandler(unittest.TestCase):
             MockRestApiServer(RestApiHandler, post +
                               '59\n\n{"fault_name":"test","fault_type":"wrong_fault_type"}')
 
-    def test_do_GET_fault_point(self):
-        self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /fault_point'))
+    def test_do_GET_inject_fault(self):
+        self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
 
         with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
-            self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /fault_point'))
+            self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
 
 
 class TestRestApiServer(unittest.TestCase):

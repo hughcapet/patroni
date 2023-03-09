@@ -406,7 +406,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         self._write_response(202, 'shutdown scheduled')
 
     @check_access
-    def do_POST_fault_point(self):
+    def do_POST_inject_fault(self):
         """Activate a fault point. Only for behave testing"""
         if not os.getenv('ENABLE_FAULT_INJECTOR'):
             self._write_response(403, 'Forbidden')
@@ -428,7 +428,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._write_response(409, f"Fault point {request['fault_name']} is already set")
 
-    def do_GET_fault_point(self):
+    def do_GET_inject_fault(self):
         """Get all currently activated points. Only for behave testing."""
         if not os.getenv('ENABLE_FAULT_INJECTOR'):
             self._write_response(403, 'Forbidden')
