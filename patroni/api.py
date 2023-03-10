@@ -388,7 +388,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
     @check_access
     def do_POST_failsafe(self):
         if self.server.patroni.ha.is_failsafe_mode():
-            self.server.patroni.ha.fault_injector.inject_fault_if_set('failsafe_network_split')
+            self.server.patroni.ha.fault_injector.inject_fault_if_activated('failsafe_network_split')
             request = self._read_json_content()
             if request:
                 message = self.server.patroni.ha.update_failsafe(request) or 'Accepted'
@@ -407,7 +407,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
     @check_access
     def do_POST_inject_fault(self):
-        """Activate a fault point. Only for behave testing"""
+        """Activate the given fault point. Only for behave testing"""
         if not os.getenv('ENABLE_FAULT_INJECTOR'):
             self._write_response(403, 'Forbidden')
             return
@@ -416,12 +416,12 @@ class RestApiHandler(BaseHTTPRequestHandler):
         try:
             fault_name = request.get('fault_name')
             fault_type = request.get('fault_type')
-            if request and fault_name and fault_type:
-                self.server.patroni.ha.fault_injector.set_fault_point(fault_name,
-                                                                      FAULT_TYPES(fault_type),
-                                                                      request.get('start_from'),
-                                                                      request.get('end_after'),
-                                                                      request.get('sleep_time'))
+            if fault_name and fault_type:
+                self.server.patroni.ha.fault_injector.activate_fault_point(fault_name,
+                                                                           FAULT_TYPES(fault_type),
+                                                                           request.get('start_from'),
+                                                                           request.get('end_after'),
+                                                                           request.get('sleep_time'))
                 self._write_response(200, 'OK')
             else:
                 self.send_error(400)
@@ -434,6 +434,27 @@ class RestApiHandler(BaseHTTPRequestHandler):
             self._write_response(403, 'Forbidden')
             return
         self._write_json_response(200, self.server.patroni.ha.fault_injector.get_fault_points())
+
+    @check_access
+    def do_DELETE_inject_fault(self):
+        """Reset the given fault point or all the existing points if no fault_name provided
+        Only for behave testing."""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+
+        request = self._read_json_content(body_is_optional=True)
+
+        if 'fault_name' in request:
+            if self.server.patroni.ha.fault_injector.deactivate_fault_point(request['fault_name']):
+                self._write_response(200, 'OK')
+                return
+            else:
+                self.send_error(400)
+                return
+
+        self.server.patroni.ha.fault_injector.reset()
+        self._write_response(200, 'OK')
 
     @staticmethod
     def parse_schedule(schedule, action):

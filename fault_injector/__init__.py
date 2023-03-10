@@ -41,28 +41,6 @@ class FaultInjector(object):
     def __init__(self) -> None:
         self._fault_points = []  # activated points
 
-    def set_fault_point(self,
-                        fault_name: str,
-                        fault_type: FAULT_TYPES,
-                        start_from: Optional[int] = 1,
-                        end_after: Optional[int] = None,
-                        sleep_time: Optional[float] = None) -> None:
-        """Activate fault point (called by API).
-        Every named fault point can be activated only with a single fault type.
-
-        :param fault_name
-        :param fault_type
-        :param start_from: inject fault starting from the Nth hit
-        :param end_after: stop fault injection after the Nth hit
-        :param sleep_time: seconds to sleep if fault_type == FAULT_TYPES.SLEEP"""
-        for fp in self._fault_points:
-            if fp.name == fault_name:
-                raise ValueError('Fault point %s is already set', fault_name)
-
-        fault_point = FaultPoint(fault_name, fault_type, start_from, end_after, sleep_time)
-        self._fault_points.append(fault_point)
-        logger.info('Activated fault point %s of type %r', fault_name, fault_type)
-
     def _get_fault_point_by_name(self, fault_name: str) -> FaultPoint:
         fault_point = None
         for fp in self._fault_points:
@@ -84,16 +62,44 @@ class FaultInjector(object):
             })
         return points
 
-    def remove_fault_point(self, fault_name: str) -> None:
-        """Deactivate fault point"""
+    def activate_fault_point(self,
+                             fault_name: str,
+                             fault_type: FAULT_TYPES,
+                             start_from: Optional[int] = 1,
+                             end_after: Optional[int] = None,
+                             sleep_time: Optional[float] = None) -> None:
+        """Every named fault point can be activated only with a single fault type.
+
+        :param fault_name
+        :param fault_type
+        :param start_from: inject fault starting from the Nth hit
+        :param end_after: stop fault injection after the Nth hit
+        :param sleep_time: seconds to sleep if fault_type == FAULT_TYPES.SLEEP"""
+        for fp in self._fault_points:
+            if fp.name == fault_name:
+                raise ValueError('Fault point %s is already set', fault_name)
+
+        fault_point = FaultPoint(fault_name, fault_type, start_from, end_after, sleep_time)
+        self._fault_points.append(fault_point)
+        logger.info('Activated fault point %s of type %r', fault_name, fault_type)
+
+    def deactivate_fault_point(self, fault_name: str) -> bool:
         fault_point = self._get_fault_point_by_name(fault_name)
+
         if not fault_point:
-            return
+            return False
+
         self._fault_points.remove(fault_point)
         logger.info('Deactivated fault point %s of type %r', fault_name, fault_point.type)
+        return True
 
-    def inject_fault_if_set(self, fault_name: str) -> None:
-        # inject fault only if the required point has been activated
+    def reset(self):
+        """Deactivate all fault points"""
+        self._fault_points = []
+
+    def inject_fault_if_activated(self, fault_name: str) -> None:
+        """Function for defining a fault point in the source code.
+        If fault point is activated (is in self._fault_points list), inject fault of the required type"""
         fault_point = self._get_fault_point_by_name(fault_name)
         if not fault_point:
             return
@@ -105,7 +111,7 @@ class FaultInjector(object):
             return
         # deactivate if work is done
         if fault_point.end_after and fault_point.hits > fault_point.end_after:
-            self.remove_fault_point(fault_point.name)
+            self.deactivate_fault_point(fault_point.name)
             return
 
         logger.info('Fault %s of type %r triggered.', fault_point.name, fault_point.type)

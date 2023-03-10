@@ -64,8 +64,8 @@ class MockFaultPoint(object):
 
 class MockFaultInjector(object):
 
-    def set_fault_point(*args):
-        if args[2] != MockFaultPoint.type:
+    def activate_fault_point(*args):
+        if args[1] != MockFaultPoint.type:
             raise ValueError
 
     def _get_fault_point_by_name(*args):
@@ -74,10 +74,15 @@ class MockFaultInjector(object):
     def get_fault_points(self):
         return [{'fault_name': MockFaultPoint.name, 'fault_type': MockFaultPoint.type}]
 
-    def remove_fault_point(*args):
+    def deactivate_fault_point(*args):
+        if args[1] != MockFaultPoint.name:
+            return False
+        return True
+
+    def reset(self):
         pass
 
-    def inject_fault_if_set(*args):
+    def inject_fault_if_activated(*args):
         pass
 
 
@@ -615,13 +620,23 @@ class TestRestApiHandler(unittest.TestCase):
             MockRestApiServer(RestApiHandler, post +
                               '52\n\n{"fault_name":"test","fault_type":"test_fault_type"}')
             MockRestApiServer(RestApiHandler, post +
-                              '59\n\n{"fault_name":"test","fault_type":"wrong_fault_type"}')
+                              '53\n\n{"fault_name":"test","fault_type":"wrong_fault_type"}')
 
     def test_do_GET_inject_fault(self):
         self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
 
         with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
             self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
+
+    def test_do_DELETE_inject_fault(self):
+        delete = 'DELETE /inject_fault HTTP/1.0' + self._authorization + '\nContent-Length: '
+        MockRestApiServer(RestApiHandler, delete + '0\n\n')
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            MockRestApiServer(RestApiHandler, delete + '0\n\n')
+            MockRestApiServer(RestApiHandler, delete + '7\n\n{"":""}')
+            MockRestApiServer(RestApiHandler, delete + '27\n\n{"fault_name":"test_point"}')
+            MockRestApiServer(RestApiHandler, delete + '21\n\n{"fault_name":"test"}')
 
 
 class TestRestApiServer(unittest.TestCase):
