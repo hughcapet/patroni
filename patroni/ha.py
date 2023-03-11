@@ -2,7 +2,6 @@ import datetime
 import functools
 import json
 import logging
-import os
 import six
 import sys
 import time
