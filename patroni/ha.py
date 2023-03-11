@@ -15,7 +15,6 @@ from threading import RLock
 from . import psycopg
 from .async_executor import AsyncExecutor, CriticalTask
 from .exceptions import DCSError, PostgresConnectionException, PatroniFatalException
-from fault_injector import FaultInjector
 from .postgresql.callback_executor import CallbackAction
 from .postgresql.misc import postgres_version_to_int
 from .postgresql.rewind import Rewind
@@ -167,9 +166,6 @@ class Ha(object):
 
         # used only in backoff after failing a pre_promote script
         self._released_leader_key_timestamp = 0
-
-        # used for behave tests
-        self.fault_injector = FaultInjector() if os.getenv('ENABLE_FAULT_INJECTOR') else None
 
     def check_mode(self, mode):
         # Try to protect from the case when DCS was wiped out during pause

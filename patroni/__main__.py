@@ -3,6 +3,7 @@ import os
 import signal
 import time
 
+from fault_injector import FaultInjector
 from patroni.daemon import AbstractPatroniDaemon, abstract_main
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class Patroni(AbstractPatroniDaemon):
         self.tags = self.get_tags()
         self.next_run = time.time()
         self.scheduled_restart = {}
+
+        # used for behave tests
+        self.fault_injector = FaultInjector() if os.getenv('ENABLE_FAULT_INJECTOR') else None
 
     def load_dynamic_configuration(self):
         from patroni.exceptions import DCSError

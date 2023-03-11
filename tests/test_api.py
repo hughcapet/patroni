@@ -90,7 +90,6 @@ class MockHa(object):
 
     state_handler = MockPostgresql()
     watchdog = MockWatchdog()
-    fault_injector = MockFaultInjector()
 
     @staticmethod
     def update_failsafe(*args):
@@ -168,6 +167,7 @@ class MockPatroni(object):
     noloadbalance = PropertyMock(return_value=False)
     scheduled_restart = {'schedule': future_restart_time,
                          'postmaster_start_time': postgresql.postmaster_start_time()}
+    fault_injector = MockFaultInjector()
 
     @staticmethod
     def sighup_handler():
