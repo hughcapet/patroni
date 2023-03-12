@@ -40,13 +40,23 @@ class TestFaultInjector(unittest.TestCase):
         self.assertEqual([], self.fi.get_fault_points())
 
         self.fi.activate_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
-        self.assertEqual([{
+        self.assertIn({
                 'fault_name': 'inject_exception',
                 'fault_type': FAULT_TYPES.EXCEPTION,
                 'start_from': 1,
                 'end_after': None,
                 'hits': 0
-            }], self.fi.get_fault_points())
+            }, self.fi.get_fault_points())
+
+        self.fi.activate_fault_point('inject_sleep', FAULT_TYPES.SLEEP, sleep_time=42)
+        self.assertIn({
+                'fault_name': 'inject_sleep',
+                'fault_type': FAULT_TYPES.SLEEP,
+                'start_from': 1,
+                'end_after': None,
+                'sleep_time': 42,
+                'hits': 0
+            }, self.fi.get_fault_points())
 
     def test_reset(self):
         self.fi.activate_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)

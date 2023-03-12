@@ -17,6 +17,7 @@ import yaml
 
 import patroni.psycopg as psycopg
 
+from fault_injector import FAULT_TYPES
 from patroni.request import PatroniRequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 
@@ -345,6 +346,25 @@ class PatroniController(AbstractController):
         subprocess.call(PatroniPoolController.BACKUP_SCRIPT + ['--walmethod=none',
                         '--datadir=' + os.path.join(self._work_directory, dest),
                         '--dbname=' + self.backup_source])
+
+    def activate_fault_point(self, fault_name, fault_type=FAULT_TYPES.EXCEPTION,
+                             start_from=1, end_after=0, sleep_time=None):
+        data = {'fault_name': fault_name,
+                'fault_type': fault_type,
+                'start_from': start_from,
+                'end_after': end_after,
+                'sleep_time': sleep_time}
+        r = self._context.request_executor.request('POST', self._restapi_url + '/inject_fault', json.dumps(data))
+
+        status = int(r.status)
+        assert status == 200, F'Fault injection to {self._restapi_url + "/inject_fault"} request failed with code {status}'
+
+    def deactivate_fault_point(self, fault_name):
+        data = {'fault_name': fault_name}
+        self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault', json.dumps(data))
+
+    def reset_fault_injector(self):
+        self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault')
 
 
 class ProcessHang(object):
@@ -933,6 +953,10 @@ class PatroniPoolController(object):
             self._dcs = os.environ.pop('DCS', 'etcd')
             assert self._dcs in self.known_dcs, 'Unsupported dcs: ' + self._dcs
         return self._dcs
+
+    def reset_all_fault_injectors(self):
+        for ctl in self._processes.values():
+            ctl.reset_fault_injector()
 
 
 class WatchdogMonitor(object):

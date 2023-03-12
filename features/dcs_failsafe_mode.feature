@@ -86,6 +86,6 @@ Feature: dcs failsafe mode
 
   @dcs-failsafe
   Scenario: check primary is demoted when one replica is not reachable while DCS is down
-    Given I inject fault 'failsafe_network_split'
+    Given I inject fault 'failsafe_network_split' into postgres2
     And I sleep for 2 seconds
     Then postgres1 role is the replica after 12 seconds
