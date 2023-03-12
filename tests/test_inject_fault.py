@@ -11,10 +11,6 @@ class TestFaultInjector(unittest.TestCase):
         self.fi = FaultInjector()
 
     def test_activate_fault_point(self):
-        with self.assertRaises(TypeError) as context:
-            self.fi.activate_fault_point('inject_wrong_type', 'wrong_type')
-        self.assertEqual(context.exception.args[0], 'Invalid fault point type')
-
         with patch('fault_injector.logger.info') as mock_logger_info:
             self.fi.activate_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
             self.assertEqual(('Activated fault point %s of type %r', 'inject_exception', FAULT_TYPES.EXCEPTION),
@@ -49,7 +45,6 @@ class TestFaultInjector(unittest.TestCase):
                 'fault_type': FAULT_TYPES.EXCEPTION,
                 'start_from': 1,
                 'end_after': None,
-                'sleep_time': None,
                 'hits': 0
             }], self.fi.get_fault_points())
 

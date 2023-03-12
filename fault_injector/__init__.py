@@ -22,20 +22,39 @@ class FaultPoint(object):
     def __init__(self, name: str,
                  fault_type: FAULT_TYPES,
                  start_from: Optional[int] = 1,
-                 end_after: Optional[int] = None,
-                 sleep_time: Optional[float] = None) -> None:
-        if not isinstance(fault_type, FAULT_TYPES):
-            raise TypeError('Invalid fault point type')
-        if fault_type == FAULT_TYPES.SLEEP and not sleep_time:
-            raise ValueError('No sleep_time provided for fault point of type sleep')
-
+                 end_after: Optional[int] = None) -> None:
         self.name = name
         self.type = fault_type
         self.start_from = start_from
         self.end_after = end_after
-        self.sleep_time = sleep_time  # only for type SLEEP
 
         self.hits = 0
+
+    def get_dict(self) -> dict:
+        return {'fault_name': self.name,
+                'fault_type': self.type,
+                'start_from': self.start_from,
+                'end_after': self.end_after,
+                'hits': self.hits}
+
+
+class FaultPointSleep(FaultPoint):
+
+    def __init__(self, name: str,
+                 fault_type: FAULT_TYPES,
+                 start_from: Optional[int] = 1,
+                 end_after: Optional[int] = None,
+                 sleep_time: Optional[float] = None) -> None:
+        super(FaultPointSleep, self).__init__(name, fault_type, start_from, end_after)
+        self.sleep_time = sleep_time
+
+    def get_dict(self) -> dict:
+        return {'fault_name': self.name,
+                'fault_type': self.type,
+                'start_from': self.start_from,
+                'end_after': self.end_after,
+                'sleep_time': self.sleep_time,
+                'hits': self.hits}
 
 
 class FaultInjector(object):
@@ -54,19 +73,8 @@ class FaultInjector(object):
         return fault_point
 
     def get_fault_points(self) -> List[dict]:
-        points = []
-
         with self.fi_lock:
-            for p in self._fault_points:
-                points.append({
-                    'fault_name': p.name,
-                    'fault_type': p.type,
-                    'start_from': p.start_from,
-                    'end_after': p.end_after,
-                    'sleep_time': p.sleep_time,
-                    'hits': p.hits
-                })
-        return points
+            return [point.get_dict() for point in self._fault_points]
 
     def activate_fault_point(self,
                              fault_name: str,
@@ -81,12 +89,18 @@ class FaultInjector(object):
         :param start_from: inject fault starting from the Nth hit
         :param end_after: stop fault injection after the Nth hit
         :param sleep_time: seconds to sleep if fault_type == FAULT_TYPES.SLEEP"""
+        if fault_type == FAULT_TYPES.SLEEP and not sleep_time:
+            raise ValueError('No sleep_time provided for fault point of type sleep')
+
         with self.fi_lock:
             for fp in self._fault_points:
                 if fp.name == fault_name:
                     raise ValueError('Fault point %s is already set', fault_name)
 
-            fault_point = FaultPoint(fault_name, fault_type, start_from, end_after, sleep_time)
+            if fault_type == FAULT_TYPES.SLEEP:
+                fault_point = FaultPointSleep(fault_name, fault_type, start_from, end_after, sleep_time)
+            else:
+                fault_point = FaultPoint(fault_name, fault_type, start_from, end_after)
             self._fault_points.append(fault_point)
             logger.info('Activated fault point %s of type %r', fault_name, fault_type)
 
