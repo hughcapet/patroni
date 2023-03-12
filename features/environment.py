@@ -357,14 +357,23 @@ class PatroniController(AbstractController):
         r = self._context.request_executor.request('POST', self._restapi_url + '/inject_fault', json.dumps(data))
 
         status = int(r.status)
-        assert status == 200, F'Fault injection to {self._restapi_url + "/inject_fault"} request failed with code {status}'
+        assert status == 200, \
+            F'Fault injection request failed with code {status}: {r.data.decode("utf-8")}'
 
     def deactivate_fault_point(self, fault_name):
         data = {'fault_name': fault_name}
-        self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault', json.dumps(data))
+        r = self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault', json.dumps(data))
+
+        status = int(r.status)
+        assert status == 200, \
+            F'Fault deactivation request failed with code {status}: {r.data.decode("utf-8")}'
 
     def reset_fault_injector(self):
-        self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault')
+        r = self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault')
+
+        status = int(r.status)
+        assert status == 200, \
+            F'Fault injector reset request failed with code {status}: {r.data.decode("utf-8")}'
 
 
 class ProcessHang(object):
@@ -1126,6 +1135,8 @@ def before_feature(context, feature):
         lib = subprocess.check_output(['pg_config', '--pkglibdir']).decode('utf-8').strip()
         if not os.path.exists(os.path.join(lib, 'citus.so')):
             return feature.skip("Citus extenstion isn't available")
+    elif feature.name == 'fault injector' and not os.environ.get('FI_DEV'):
+        feature.skip()
     context.pctl.create_and_set_output_directory(feature.name)
 
 

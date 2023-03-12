@@ -425,8 +425,9 @@ class RestApiHandler(BaseHTTPRequestHandler):
                 self._write_response(200, 'OK')
             else:
                 self.send_error(400)
-        except ValueError:
-            self._write_response(409, f"Fault point {request['fault_name']} is already set")
+        except ValueError as e:
+            ret = 409 if 'already set' in str(e) else 400
+            self._write_response(ret, f"{e}")
 
     def do_GET_inject_fault(self):
         """Get all currently activated points. Only for behave testing."""

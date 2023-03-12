@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class FAULT_TYPES(str, Enum):
     EXCEPTION = 'exception'
-    SLEEP = 'string'
+    SLEEP = 'sleep'
 
     def __repr__(self):
         return self.value
