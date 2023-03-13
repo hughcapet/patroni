@@ -63,7 +63,7 @@ def check_fault_activated(context, patroni_name, fault_name):
             do_get(context, proc._restapi_url + '/inject_fault')
             assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
 
-            set_point = next((i for i in context.response if i['fault_name'] == fault_name), None)
+            set_point = next((i for i in context.response if i['name'] == fault_name), None)
             assert set_point, 'Set fault point is not present in the response'
             break
     else:
@@ -77,7 +77,7 @@ def check_fault_deactivated(context, patroni_name, fault_name):
             do_get(context, proc._restapi_url + '/inject_fault')
             assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
 
-            set_point = next((i for i in context.response if i['fault_name'] == fault_name), None)
+            set_point = next((i for i in context.response if i['name'] == fault_name), None)
             assert not set_point, 'Set fault point is present in the response'
             break
     else:

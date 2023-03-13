@@ -349,7 +349,7 @@ class PatroniController(AbstractController):
 
     def activate_fault_point(self, fault_name, fault_type=FAULT_TYPES.EXCEPTION,
                              start_from=1, end_after=0, sleep_time=None):
-        data = {'fault_name': fault_name,
+        data = {'name': fault_name,
                 'fault_type': fault_type,
                 'start_from': start_from,
                 'end_after': end_after,
@@ -361,7 +361,7 @@ class PatroniController(AbstractController):
             F'Fault injection request failed with code {status}: {r.data.decode("utf-8")}'
 
     def deactivate_fault_point(self, fault_name):
-        data = {'fault_name': fault_name}
+        data = {'name': fault_name}
         r = self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault', json.dumps(data))
 
         status = int(r.status)

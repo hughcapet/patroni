@@ -41,7 +41,7 @@ class TestFaultInjector(unittest.TestCase):
 
         self.fi.activate_fault_point('inject_exception', FAULT_TYPES.EXCEPTION)
         self.assertIn({
-                'fault_name': 'inject_exception',
+                'name': 'inject_exception',
                 'fault_type': FAULT_TYPES.EXCEPTION,
                 'start_from': 1,
                 'end_after': None,
@@ -50,7 +50,7 @@ class TestFaultInjector(unittest.TestCase):
 
         self.fi.activate_fault_point('inject_sleep', FAULT_TYPES.SLEEP, sleep_time=42)
         self.assertIn({
-                'fault_name': 'inject_sleep',
+                'name': 'inject_sleep',
                 'fault_type': FAULT_TYPES.SLEEP,
                 'start_from': 1,
                 'end_after': None,

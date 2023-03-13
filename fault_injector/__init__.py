@@ -24,18 +24,11 @@ class FaultPoint(object):
                  start_from: Optional[int] = 1,
                  end_after: Optional[int] = None) -> None:
         self.name = name
-        self.type = fault_type
+        self.fault_type = fault_type
         self.start_from = start_from
         self.end_after = end_after
 
         self.hits = 0
-
-    def get_dict(self) -> dict:
-        return {'fault_name': self.name,
-                'fault_type': self.type,
-                'start_from': self.start_from,
-                'end_after': self.end_after,
-                'hits': self.hits}
 
 
 class FaultPointSleep(FaultPoint):
@@ -47,14 +40,6 @@ class FaultPointSleep(FaultPoint):
                  sleep_time: Optional[float] = None) -> None:
         super(FaultPointSleep, self).__init__(name, fault_type, start_from, end_after)
         self.sleep_time = sleep_time
-
-    def get_dict(self) -> dict:
-        return {'fault_name': self.name,
-                'fault_type': self.type,
-                'start_from': self.start_from,
-                'end_after': self.end_after,
-                'sleep_time': self.sleep_time,
-                'hits': self.hits}
 
 
 class FaultInjector(object):
@@ -74,7 +59,7 @@ class FaultInjector(object):
 
     def get_fault_points(self) -> List[dict]:
         with self.fi_lock:
-            return [point.get_dict() for point in self._fault_points]
+            return [point.__dict__ for point in self._fault_points]
 
     def activate_fault_point(self,
                              fault_name: str,
@@ -111,7 +96,7 @@ class FaultInjector(object):
             if not fault_point:
                 return False
             self._fault_points.remove(fault_point)
-            logger.info('Deactivated fault point %s of type %r', fault_name, fault_point.type)
+            logger.info('Deactivated fault point %s of type %r', fault_name, fault_point.fault_type)
         return True
 
     def reset(self):
@@ -139,10 +124,10 @@ class FaultInjector(object):
 
             current_fault_point = deepcopy(fault_point)
 
-        logger.info('Fault %s of type %r triggered.', current_fault_point.name, current_fault_point.type)
+        logger.info('Fault %s of type %r triggered.', current_fault_point.name, current_fault_point.fault_type)
 
         # do the actual work based on the fault type
-        if current_fault_point.type == FAULT_TYPES.EXCEPTION:
+        if current_fault_point.fault_type == FAULT_TYPES.EXCEPTION:
             raise Exception('Exception raised by fault point {0}'.format(current_fault_point.name))
-        elif current_fault_point.type == FAULT_TYPES.SLEEP:
+        elif current_fault_point.fault_type == FAULT_TYPES.SLEEP:
             time.sleep(current_fault_point.sleep_time)

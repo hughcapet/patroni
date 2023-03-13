@@ -414,7 +414,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
         request = self._read_json_content()
         try:
-            fault_name = request.get('fault_name')
+            fault_name = request.get('name')
             fault_type = request.get('fault_type')
             if fault_name and fault_type:
                 self.server.patroni.fault_injector.activate_fault_point(fault_name,
@@ -438,7 +438,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
     @check_access
     def do_DELETE_inject_fault(self):
-        """Reset the given fault point or all the existing points if no fault_name provided
+        """Reset the given fault point or all the existing points if no name provided
         Only for behave testing."""
         if not os.getenv('ENABLE_FAULT_INJECTOR'):
             self._write_response(403, 'Forbidden')
@@ -446,8 +446,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
         request = self._read_json_content(body_is_optional=True)
 
-        if 'fault_name' in request:
-            if self.server.patroni.fault_injector.deactivate_fault_point(request['fault_name']):
+        if 'name' in request:
+            if self.server.patroni.fault_injector.deactivate_fault_point(request['name']):
                 self._write_response(200, 'OK')
                 return
             else:
