@@ -135,7 +135,7 @@ class TestClient(unittest.TestCase):
     @patch('dns.resolver.query', dns_query)
     @patch('socket.getaddrinfo', socket_getaddrinfo)
     @patch('patroni.dcs.etcd.requests_get', requests_get)
-    @patch.object(EtcdClient, '_get_machines_list',
+    @patch.object(EtcdClient, '_get_cluster_members',
                   Mock(return_value=['http://localhost:2379', 'http://localhost:4001']))
     def setUp(self):
         self.client = EtcdClient({'srv': 'test', 'retry_timeout': 3}, DnsCachingResolver())
@@ -156,7 +156,7 @@ class TestClient(unittest.TestCase):
         except Exception:
             self.assertIsNone(machines)
 
-    @patch.object(EtcdClient, '_get_machines_list',
+    @patch.object(EtcdClient, '_get_cluster_members',
                   Mock(return_value=['http://localhost:4001', 'http://localhost:2379']))
     def test_api_execute(self):
         self.client._base_uri = 'http://localhost:4001'
@@ -187,16 +187,16 @@ class TestClient(unittest.TestCase):
         self.assertEqual(self.client.get_srv_record('_etcd-server._tcp.blabla'), [])
         self.assertEqual(self.client.get_srv_record('_etcd-server._tcp.exception'), [])
 
-    def test__get_machines_cache_from_srv(self):
-        self.client._get_machines_cache_from_srv('foobar')
-        self.client._get_machines_cache_from_srv('foobar', 'baz')
+    def test__get_machines_list_from_srv(self):
+        self.client._get_machines_list_from_srv('foobar')
+        self.client._get_machines_list_from_srv('foobar', 'baz')
         self.client.get_srv_record = Mock(return_value=[('localhost', 2380)])
-        self.client._get_machines_cache_from_srv('blabla')
+        self.client._get_machines_list_from_srv('blabla')
 
-    def test__get_machines_cache_from_dns(self):
-        self.client._get_machines_cache_from_dns('error', 2379)
+    def test__get_machines_list_from_dns(self):
+        self.client._get_machines_list_from_dns('error', 2379)
 
-    @patch.object(EtcdClient, '_get_machines_list', Mock(side_effect=etcd.EtcdConnectionFailed))
+    @patch.object(EtcdClient, '_get_cluster_members', Mock(side_effect=etcd.EtcdConnectionFailed))
     def test__refresh_machines_cache(self):
         self.assertFalse(self.client._refresh_machines_cache())
         self.assertRaises(etcd.EtcdException, self.client._refresh_machines_cache, ['http://localhost:2379'])
@@ -229,7 +229,7 @@ class TestClient(unittest.TestCase):
 class TestEtcd(unittest.TestCase):
 
     @patch('socket.getaddrinfo', socket_getaddrinfo)
-    @patch.object(EtcdClient, '_get_machines_list',
+    @patch.object(EtcdClient, '_get_cluster_members',
                   Mock(return_value=['http://localhost:2379', 'http://localhost:4001']))
     def setUp(self):
         self.etcd = Etcd({'namespace': '/patroni/', 'ttl': 30, 'retry_timeout': 10,
@@ -240,7 +240,7 @@ class TestEtcd(unittest.TestCase):
 
     @patch('dns.resolver.query', dns_query)
     @patch('time.sleep', Mock(side_effect=SleepException))
-    @patch.object(EtcdClient, '_get_machines_list', Mock(side_effect=etcd.EtcdConnectionFailed))
+    @patch.object(EtcdClient, '_get_cluster_members', Mock(side_effect=etcd.EtcdConnectionFailed))
     def test_get_etcd_client(self):
         self.assertRaises(SleepException, self.etcd.get_etcd_client,
                           {'discovery_srv': 'test', 'retry_timeout': 10, 'cacert': '1', 'key': '1', 'cert': 1},
@@ -249,7 +249,7 @@ class TestEtcd(unittest.TestCase):
                           {'url': 'https://test:2379', 'retry_timeout': 10}, EtcdClient)
         self.assertRaises(SleepException, self.etcd.get_etcd_client,
                           {'hosts': 'foo:4001,bar', 'retry_timeout': 10}, EtcdClient)
-        with patch.object(EtcdClient, '_get_machines_list', Mock(return_value=[])):
+        with patch.object(EtcdClient, '_get_cluster_members', Mock(return_value=[])):
             self.assertRaises(SleepException, self.etcd.get_etcd_client,
                               {'proxy': 'https://user:password@test:2379', 'retry_timeout': 10}, EtcdClient)
 

@@ -99,7 +99,7 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         # Workaround for the case when https://github.com/jplana/python-etcd/pull/196 is not applied
         self.http.connection_pool_kw.pop('ssl_version', None)
         self._config = config
-        self._load_machines_cache()
+        self._load_machines_cache()  # fill up self._machines_cache
         self._allow_reconnect = True
         # allow passing retry argument to api_execute in params
         self._comparison_conditions.add('retry')
@@ -168,18 +168,18 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         base_uri, cache = self._base_uri, self._machines_cache
         return ([base_uri] if base_uri in cache else []) + [machine for machine in cache if machine != base_uri]
 
-    def _get_machines_list(self, machines_cache: List[str]) -> List[str]:
+    def _get_cluster_members(self, machines_list: List[str]) -> List[str]:
         """Gets list of members from Etcd cluster using API
 
-        :param machines_cache: initial list of Etcd members
+        :param machines_list: list of Etcd members to send request to
         :returns: list of clientURLs retrieved from Etcd cluster
         :raises EtcdConnectionFailed: if failed"""
-        kwargs = self._prepare_get_members(len(machines_cache))
+        kwargs = self._prepare_get_members(len(machines_list))
 
-        for base_uri in machines_cache:
+        for base_uri in machines_list:
             try:
                 machines = list(set(self._get_members(base_uri, **kwargs)))
-                logger.debug("Retrieved list of machines: %s", machines)
+                logger.debug("Retrieved list of Etcd cluster machines: %s", machines)
                 if machines:
                     random.shuffle(machines)
                     if not self._use_proxies:
@@ -203,9 +203,9 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         Also this method implements the same timeout-retry logic as `api_execute`, because
         the original method was retrying 2 times with the `read_timeout` on each node.
 
-        After the next refactoring the whole logic was moved to the _get_machines_list() method."""
+        After the next refactoring the whole logic was moved to the _get_cluster_members() method."""
 
-        return self._get_machines_list(self.machines_cache)
+        return self._get_cluster_members(self.machines_cache)
 
     def set_read_timeout(self, timeout):
         self._read_timeout = timeout
@@ -297,7 +297,7 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         except DNSException:
             return []
 
-    def _get_machines_cache_from_srv(self, srv, srv_suffix=None):
+    def _get_machines_list_from_srv(self, srv: str, srv_suffix: Optional[str] = None) -> List[str]:
         """Fetch list of etcd-cluster member by resolving _etcd-server._tcp. SRV record.
         This record should contain list of host and peer ports which could be used to run
         'GET http://{host}:{port}/members' request (peer protocol)"""
@@ -327,7 +327,7 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
             logger.warning('Can not resolve SRV for %s', srv)
         return list(set(ret))
 
-    def _get_machines_cache_from_dns(self, host, port):
+    def _get_machines_list_from_dns(self, host: str, port: str) -> List[str]:
         """One host might be resolved into multiple ip addresses. We will make list out of it"""
         if self.protocol == 'http':
             ret = map(lambda res: uri(self.protocol, res[-1][:2]), self._dns_resolver.resolve(host, port))
@@ -335,20 +335,20 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
                 return list(set(ret))
         return [uri(self.protocol, (host, port))]
 
-    def _get_machines_cache_from_config(self):
+    def _get_machines_list_from_config(self) -> List[str]:
         if 'proxy' in self._config:
             return [uri(self.protocol, (self._config['host'], self._config['port']))]
 
-        machines_cache = []
+        machines_list = []
         if 'srv' in self._config:
-            machines_cache = self._get_machines_cache_from_srv(self._config['srv'], self._config.get('srv_suffix'))
+            machines_list = self._get_machines_list_from_srv(self._config['srv'], self._config.get('srv_suffix'))
 
-        if not machines_cache and 'hosts' in self._config:
-            machines_cache = list(self._config['hosts'])
+        if not machines_list and 'hosts' in self._config:
+            machines_list = list(self._config['hosts'])
 
-        if not machines_cache and 'host' in self._config:
-            machines_cache = self._get_machines_cache_from_dns(self._config['host'], self._config['port'])
-        return machines_cache
+        if not machines_list and 'host' in self._config:
+            machines_list = self._get_machines_list_from_dns(self._config['host'], self._config['port'])
+        return machines_list
 
     @staticmethod
     def _update_dns_cache(func, machines):
@@ -368,24 +368,24 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         if 'srv' not in self._config and 'host' not in self._config and 'hosts' not in self._config:
             raise Exception('Neither srv, hosts, host nor url are defined in etcd section of config')
 
-        machines_cache = self._get_machines_cache_from_config()
+        machines_list = self._get_machines_list_from_config()
         # Can not bootstrap list of etcd-cluster members, giving up
-        if not machines_cache:
+        if not machines_list:
             raise etcd.EtcdException
 
         # enforce resolving dns name,they might get new ips
-        self._update_dns_cache(self._dns_resolver.remove, machines_cache)
+        self._update_dns_cache(self._dns_resolver.remove, machines_list)
 
         # after filling up the initial list of machines_cache we should ask etcd-cluster about actual list
-        ret = self._refresh_machines_cache(machines_cache)
+        ret = self._refresh_machines_cache(machines_list)
 
         self._update_machines_cache = False
         return ret
 
-    def _refresh_machines_cache(self, machines_cache: Optional[List[str]] = None) -> bool:
+    def _refresh_machines_cache(self, machines_list: Optional[List[str]] = None) -> bool:
         """Get etcd cluster topology using Etcd API and put it to self._machines_cache
 
-        :param machines_cache: the list of nodes we want to run through executing API request
+        :param machines_list: the list of nodes we want to run through executing API request
                                in addition to values stored in the self._machines_cache
         :returns: `True` if self._machines_cache was updated with new values
         :raises EtcdException: if failed to get topology and `machines_cache` was specified.
@@ -394,18 +394,18 @@ class AbstractEtcdClientWithFailover(abc.ABC, etcd.Client):
         not accessible or if they are not returning correct results."""
 
         if self._use_proxies:
-            value = self._get_machines_cache_from_config()
+            value = self._get_machines_list_from_config()
         else:
             try:
                 # we want to go through the list obtained from the config file + last known health topology
-                value = self._get_machines_list(list(set((machines_cache or []) + self.machines_cache)))
+                value = self._get_cluster_members(list(set((machines_list or []) + self.machines_cache)))
             except etcd.EtcdConnectionFailed:
                 value = []
 
         if value:
             ret = set(self._machines_cache) != set(value)
             self._machines_cache = value
-        elif machines_cache:  # we are just starting or all nodes were not available at some point
+        elif machines_list:  # we are just starting or all nodes were not available at some point
             raise etcd.EtcdException("Could not get the list of servers, "
                                      "maybe you provided the wrong "
                                      "host(s) to connect to?")

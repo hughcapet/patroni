@@ -28,7 +28,7 @@ class TestCtl(unittest.TestCase):
     TEST_ROLES = ('master', 'primary', 'leader')
 
     @patch('socket.getaddrinfo', socket_getaddrinfo)
-    @patch.object(AbstractEtcdClientWithFailover, '_get_machines_list', Mock(return_value=['http://remotehost:2379']))
+    @patch.object(AbstractEtcdClientWithFailover, '_get_cluster_members', Mock(return_value=['http://remotehost:2379']))
     def setUp(self):
         self.runner = CliRunner()
         self.e = get_dcs({'etcd': {'ttl': 30, 'host': 'ok:2379', 'retry_timeout': 10},

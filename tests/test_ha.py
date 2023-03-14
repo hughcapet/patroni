@@ -199,7 +199,7 @@ class TestHa(PostgresInit):
     @patch('socket.getaddrinfo', socket_getaddrinfo)
     @patch('patroni.dcs.dcs_modules', Mock(return_value=['patroni.dcs.etcd']))
     @patch.object(etcd.Client, 'read', etcd_read)
-    @patch.object(AbstractEtcdClientWithFailover, '_get_machines_list', Mock(return_value=['http://remotehost:2379']))
+    @patch.object(AbstractEtcdClientWithFailover, '_get_cluster_members', Mock(return_value=['http://remotehost:2379']))
     def setUp(self):
         super(TestHa, self).setUp()
         self.p.set_state('running')
