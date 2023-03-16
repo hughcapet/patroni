@@ -871,6 +871,12 @@ class PatroniPoolController(object):
             ctl.stop()
         self._processes.clear()
 
+    def get_proc_by_name(self, name):
+        proc = next((proc for n, proc in self._processes.items() if n == name), None)
+        if not proc:
+            assert False, F'Could not find {name} process'
+        return proc
+
     def create_and_set_output_directory(self, feature_name):
         feature_dir = os.path.join(self.patroni_path, 'features', 'output', feature_name.replace(' ', '_'))
         if os.path.exists(feature_dir):

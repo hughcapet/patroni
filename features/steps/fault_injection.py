@@ -10,12 +10,8 @@ from features.steps.patroni_api import do_get
       " end_after={end_after:d}) into {patroni_name:w}")
 def activate_fault_point(context, patroni_name,
                          fault_name, fault_type=FAULT_TYPES.EXCEPTION, start_from=1, end_after=0):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            proc.activate_fault_point(fault_name, fault_type, start_from, end_after)
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    proc = context.pctl.get_proc_by_name(patroni_name)
+    proc.activate_fault_point(fault_name, fault_type, start_from, end_after)
 
 
 @step("I inject fault '{fault_name:w}' (type=sleep, sleep_time={sleep_time:d}) into {patroni_name:w}")
@@ -23,32 +19,20 @@ def activate_fault_point(context, patroni_name,
       " sleep_time={sleep_time:d}) into {patroni_name:w}")
 def activate_fault_point_sleep(context, patroni_name,
                                fault_name, sleep_time, start_from=1, end_after=0):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            proc.activate_fault_point(fault_name, FAULT_TYPES.SLEEP, start_from, end_after, sleep_time)
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    proc = context.pctl.get_proc_by_name(patroni_name)
+    proc.activate_fault_point(fault_name, FAULT_TYPES.SLEEP, start_from, end_after, sleep_time)
 
 
 @step("I deactivate fault point '{fault_name:w}' in {patroni_name:w}")
 def deactivate_fault_point(context, fault_name, patroni_name):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            proc.deactivate_fault_point(fault_name)
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    proc = context.pctl.get_proc_by_name(patroni_name)
+    proc.deactivate_fault_point(fault_name)
 
 
 @step("I deactivate all fault points in {patroni_name:w}")
 def reset_fault_injector(context, patroni_name):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            proc.reset_fault_injector()
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    proc = context.pctl.get_proc_by_name(patroni_name)
+    proc.reset_fault_injector()
 
 
 @step("I deactivate all fault points")
@@ -58,37 +42,31 @@ def reset_all_fault_injectors(context):
 
 @then("fault point '{fault_name:w}' is activated in {patroni_name:w}")
 def check_fault_activated(context, patroni_name, fault_name):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            do_get(context, proc._restapi_url + '/inject_fault')
-            assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+    proc = context.pctl.get_proc_by_name(patroni_name)
 
-            set_point = next((i for i in context.response if i['name'] == fault_name), None)
-            assert set_point, 'Set fault point is not present in the response'
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    do_get(context, proc._restapi_url + '/inject_fault')
+    assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+
+    set_point = next((i for i in context.response if i['name'] == fault_name), None)
+    assert set_point, 'Set fault point is not present in the response'
 
 
 @then("fault point '{fault_name:w}' is not activated in {patroni_name:w}")
 def check_fault_deactivated(context, patroni_name, fault_name):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            do_get(context, proc._restapi_url + '/inject_fault')
-            assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+    proc = context.pctl.get_proc_by_name(patroni_name)
 
-            set_point = next((i for i in context.response if i['name'] == fault_name), None)
-            assert not set_point, 'Set fault point is present in the response'
-            break
-    else:
-        assert False, F'Could not find {patroni_name} process'
+    do_get(context, proc._restapi_url + '/inject_fault')
+    assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+
+    set_point = next((i for i in context.response if i['name'] == fault_name), None)
+    assert not set_point, 'Set fault point is present in the response'
 
 
 @then("there are no activated fault points in {patroni_name:w}")
 def check_fault_injector_reset(context, patroni_name):
-    for name, proc in context.pctl._processes.items():
-        if name == patroni_name:
-            do_get(context, proc._restapi_url + '/inject_fault')
-            assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+    proc = context.pctl.get_proc_by_name(patroni_name)
 
-            assert len(context.response) == 0, 'Fault injector was not reset'
+    do_get(context, proc._restapi_url + '/inject_fault')
+    assert context.status_code == 200, 'Fault injection check request failed with code {context.status_code}'
+
+    assert len(context.response) == 0, 'Fault injector was not reset'

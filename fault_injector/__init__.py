@@ -13,12 +13,16 @@ class FAULT_TYPES(str, Enum):
     EXCEPTION = 'exception'
     SLEEP = 'sleep'
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.value
 
 
 class FaultPoint(object):
-    # TODO: class docstring
+    """Activated named fault point
+
+    start_from - inject fault only starting from the Nth hit
+    end_after: stop fault injection after the Nth hit
+    """
     def __init__(self, name: str,
                  fault_type: FAULT_TYPES,
                  start_from: Optional[int] = 1,
@@ -43,19 +47,14 @@ class FaultPointSleep(FaultPoint):
 
 
 class FaultInjector(object):
-    # TODO: class docstring
+
     def __init__(self) -> None:
         self.fi_lock = RLock()
         self._fault_points = []  # activated points
 
-    def _get_fault_point_by_name(self, fault_name: str) -> FaultPoint:
+    def _get_fault_point_by_name(self, fault_name: str) -> Optional[FaultPoint]:
         """Caller must hold fi_lock"""
-        fault_point = None
-        for fp in self._fault_points:
-            if fp.name == fault_name:
-                fault_point = fp
-                break
-        return fault_point
+        return next((fp for fp in self._fault_points if fp.name == fault_name), None)
 
     def get_fault_points(self) -> List[dict]:
         with self.fi_lock:
@@ -67,20 +66,13 @@ class FaultInjector(object):
                              start_from: Optional[int] = 1,
                              end_after: Optional[int] = None,
                              sleep_time: Optional[float] = None) -> None:
-        """Every named fault point can be activated only with a single fault type.
-
-        :param fault_name
-        :param fault_type
-        :param start_from: inject fault starting from the Nth hit
-        :param end_after: stop fault injection after the Nth hit
-        :param sleep_time: seconds to sleep if fault_type == FAULT_TYPES.SLEEP"""
+        """Every named fault point can be activated with a single fault type only."""
         if fault_type == FAULT_TYPES.SLEEP and not sleep_time:
             raise ValueError('No sleep_time provided for fault point of type sleep')
 
         with self.fi_lock:
-            for fp in self._fault_points:
-                if fp.name == fault_name:
-                    raise ValueError('Fault point %s is already set', fault_name)
+            if self._get_fault_point_by_name(fault_name):
+                raise ValueError('Fault point %s is already set', fault_name)
 
             if fault_type == FAULT_TYPES.SLEEP:
                 fault_point = FaultPointSleep(fault_name, fault_type, start_from, end_after, sleep_time)
@@ -106,7 +98,8 @@ class FaultInjector(object):
 
     def inject_fault_if_activated(self, fault_name: str) -> None:
         """Function for defining a fault point in the source code.
-        If fault point is activated (is in self._fault_points list), inject fault of the required type"""
+        If fault point is activated (is in self._fault_points list),
+        inject fault of the required type"""
         with self.fi_lock:
             fault_point = self._get_fault_point_by_name(fault_name)
             if not fault_point:
