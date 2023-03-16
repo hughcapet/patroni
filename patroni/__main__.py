@@ -3,8 +3,12 @@ import os
 import signal
 import time
 
-from fault_injector import FaultInjector
 from patroni.daemon import AbstractPatroniDaemon, abstract_main
+
+try:
+    from fault_injector import FaultInjector
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 

@@ -19,10 +19,14 @@ from threading import Thread
 
 from . import psycopg
 from .exceptions import PostgresConnectionException, PostgresException
-from fault_injector import FAULT_TYPES
 from .postgresql.misc import postgres_version_to_int
 from .utils import deep_compare, enable_keepalive, parse_bool, patch_config, Retry, \
     RetryFailedError, parse_int, split_host_port, tzutc, uri, cluster_as_json
+
+try:
+    from fault_injector import FAULT_TYPES
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 

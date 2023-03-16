@@ -156,7 +156,7 @@ def setup_package(version):
         keywords=KEYWORDS,
         long_description=read('README.rst'),
         classifiers=CLASSIFIERS,
-        packages=find_packages(exclude=['tests', 'tests.*']),
+        packages=find_packages(exclude=['tests', 'tests.*', 'fault_injector']),
         package_data={MAIN_PACKAGE: ["*.json"]},
         install_requires=install_requires,
         extras_require=EXTRAS_REQUIRE,
