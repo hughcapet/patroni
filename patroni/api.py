@@ -413,6 +413,9 @@ class RestApiHandler(BaseHTTPRequestHandler):
             return
 
         request = self._read_json_content()
+        if request is None:
+            return
+
         try:
             fault_name = request.get('name')
             fault_type = request.get('fault_type')
