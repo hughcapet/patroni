@@ -109,7 +109,7 @@ class PyTest(_Command):
 
         args = ['--verbose', 'tests', '--doctest-modules', MAIN_PACKAGE] +\
             ['-s' if logging.getLogger().getEffectiveLevel() < logging.WARNING else '--capture=fd'] +\
-            ['--cov', MAIN_PACKAGE, '--cov-report', 'term-missing', '--cov-report', 'xml']
+            ['--cov', MAIN_PACKAGE, '--cov', 'fault_injector', '--cov-report', 'term-missing', '--cov-report', 'xml']
 
         errno = pytest.main(args=args)
         sys.exit(errno)
@@ -156,7 +156,7 @@ def setup_package(version):
         keywords=KEYWORDS,
         long_description=read('README.rst'),
         classifiers=CLASSIFIERS,
-        packages=find_packages(exclude=['tests', 'tests.*']),
+        packages=find_packages(exclude=['tests', 'tests.*', 'fault_injector']),
         package_data={MAIN_PACKAGE: ["*.json"]},
         install_requires=install_requires,
         extras_require=EXTRAS_REQUIRE,

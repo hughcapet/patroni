@@ -57,6 +57,35 @@ class MockWatchdog(object):
     is_healthy = False
 
 
+class MockFaultPoint(object):
+    name = 'test_point'
+    fault_type = 'test_fault_type'
+
+
+class MockFaultInjector(object):
+
+    def activate_fault_point(*args):
+        if args[1] != MockFaultPoint.fault_type:
+            raise ValueError
+
+    def _get_fault_point_by_name(*args):
+        return MockFaultPoint()
+
+    def get_fault_points(self):
+        return [{'name': MockFaultPoint.name, 'fault_type': MockFaultPoint.fault_type}]
+
+    def deactivate_fault_point(*args):
+        if args[1] != MockFaultPoint.name:
+            return False
+        return True
+
+    def reset(self):
+        pass
+
+    def inject_fault_if_activated(*args):
+        pass
+
+
 class MockHa(object):
 
     state_handler = MockPostgresql()
@@ -138,6 +167,7 @@ class MockPatroni(object):
     noloadbalance = PropertyMock(return_value=False)
     scheduled_restart = {'schedule': future_restart_time,
                          'postmaster_start_time': postgresql.postmaster_start_time()}
+    fault_injector = MockFaultInjector()
 
     @staticmethod
     def sighup_handler():
@@ -580,6 +610,33 @@ class TestRestApiHandler(unittest.TestCase):
         post = 'POST /citus HTTP/1.0' + self._authorization + '\nContent-Length: '
         MockRestApiServer(RestApiHandler, post + '0\n\n')
         MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
+
+    def test_do_POST_inject_fault(self):
+        post = 'POST /inject_fault HTTP/1.0' + self._authorization + '\nContent-Length: '
+        MockRestApiServer(RestApiHandler, post + '0\n\n')
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            MockRestApiServer(RestApiHandler, post + '7\n\n{"":""}')
+            MockRestApiServer(RestApiHandler, post +
+                              '46\n\n{"name":"test","fault_type":"test_fault_type"}')
+            MockRestApiServer(RestApiHandler, post +
+                              '47\n\n{"name":"test","fault_type":"wrong_fault_type"}')
+
+    def test_do_GET_inject_fault(self):
+        self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /inject_fault'))
+
+    def test_do_DELETE_inject_fault(self):
+        delete = 'DELETE /inject_fault HTTP/1.0' + self._authorization + '\nContent-Length: '
+        MockRestApiServer(RestApiHandler, delete + '0\n\n')
+
+        with patch('os.environ', {'ENABLE_FAULT_INJECTOR': 'true'}):
+            MockRestApiServer(RestApiHandler, delete + '0\n\n')
+            MockRestApiServer(RestApiHandler, delete + '7\n\n{"":""}')
+            MockRestApiServer(RestApiHandler, delete + '21\n\n{"name":"test_point"}')
+            MockRestApiServer(RestApiHandler, delete + '15\n\n{"name":"test"}')
 
 
 class TestRestApiServer(unittest.TestCase):

@@ -17,6 +17,7 @@ import yaml
 
 import patroni.psycopg as psycopg
 
+from fault_injector import FAULT_TYPES
 from patroni.request import PatroniRequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 
@@ -149,6 +150,7 @@ class PatroniController(AbstractController):
             env['PATRONI_KUBERNETES_POD_IP'] = '10.0.0.' + self._name[-1]
         if os.name == 'nt':
             env['BEHAVE_DEBUG'] = 'true'
+        env['ENABLE_FAULT_INJECTOR'] = 'true'
         patroni = subprocess.Popen([sys.executable, '-m', 'coverage', 'run',
                                    '--source=patroni', '-p', 'patroni.py', self._config], env=env,
                                    stdout=self._log, stderr=subprocess.STDOUT, cwd=self._work_directory)
@@ -344,6 +346,34 @@ class PatroniController(AbstractController):
         subprocess.call(PatroniPoolController.BACKUP_SCRIPT + ['--walmethod=none',
                         '--datadir=' + os.path.join(self._work_directory, dest),
                         '--dbname=' + self.backup_source])
+
+    def activate_fault_point(self, fault_name, fault_type=FAULT_TYPES.EXCEPTION,
+                             start_from=1, end_after=0, sleep_time=None):
+        data = {'name': fault_name,
+                'fault_type': fault_type,
+                'start_from': start_from,
+                'end_after': end_after,
+                'sleep_time': sleep_time}
+        r = self._context.request_executor.request('POST', self._restapi_url + '/inject_fault', json.dumps(data))
+
+        status = int(r.status)
+        assert status == 200, \
+            F'Fault injection request failed with code {status}: {r.data.decode("utf-8")}'
+
+    def deactivate_fault_point(self, fault_name):
+        data = {'name': fault_name}
+        r = self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault', json.dumps(data))
+
+        status = int(r.status)
+        assert status == 200, \
+            F'Fault deactivation request failed with code {status}: {r.data.decode("utf-8")}'
+
+    def reset_fault_injector(self):
+        r = self._context.request_executor.request('DELETE', self._restapi_url + '/inject_fault')
+
+        status = int(r.status)
+        assert status == 200, \
+            F'Fault injector reset request failed with code {status}: {r.data.decode("utf-8")}'
 
 
 class ProcessHang(object):
@@ -841,6 +871,12 @@ class PatroniPoolController(object):
             ctl.stop()
         self._processes.clear()
 
+    def get_proc_by_name(self, name):
+        proc = next((proc for n, proc in self._processes.items() if n == name), None)
+        if not proc:
+            assert False, F'Could not find {name} process'
+        return proc
+
     def create_and_set_output_directory(self, feature_name):
         feature_dir = os.path.join(self.patroni_path, 'features', 'output', feature_name.replace(' ', '_'))
         if os.path.exists(feature_dir):
@@ -932,6 +968,10 @@ class PatroniPoolController(object):
             self._dcs = os.environ.pop('DCS', 'etcd')
             assert self._dcs in self.known_dcs, 'Unsupported dcs: ' + self._dcs
         return self._dcs
+
+    def reset_all_fault_injectors(self):
+        for ctl in self._processes.values():
+            ctl.reset_fault_injector()
 
 
 class WatchdogMonitor(object):
@@ -1101,6 +1141,8 @@ def before_feature(context, feature):
         lib = subprocess.check_output(['pg_config', '--pkglibdir']).decode('utf-8').strip()
         if not os.path.exists(os.path.join(lib, 'citus.so')):
             return feature.skip("Citus extenstion isn't available")
+    elif feature.name == 'fault injector' and not os.environ.get('FI_DEV'):
+        feature.skip()
     context.pctl.create_and_set_output_directory(feature.name)
 
 

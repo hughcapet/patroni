@@ -23,6 +23,11 @@ from .postgresql.misc import postgres_version_to_int
 from .utils import deep_compare, enable_keepalive, parse_bool, patch_config, Retry, \
     RetryFailedError, parse_int, split_host_port, tzutc, uri, cluster_as_json
 
+try:
+    from fault_injector import FAULT_TYPES
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -387,6 +392,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
     @check_access
     def do_POST_failsafe(self):
         if self.server.patroni.ha.is_failsafe_mode():
+            self.server.patroni.fault_injector.inject_fault_if_activated('failsafe_network_split')
             request = self._read_json_content()
             if request:
                 message = self.server.patroni.ha.update_failsafe(request) or 'Accepted'
@@ -402,6 +408,61 @@ class RestApiHandler(BaseHTTPRequestHandler):
         if os.name == 'nt' and os.getenv('BEHAVE_DEBUG'):
             self.server.patroni.api_sigterm()
         self._write_response(202, 'shutdown scheduled')
+
+    @check_access
+    def do_POST_inject_fault(self):
+        """Activate the given fault point. Only for behave testing"""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+
+        request = self._read_json_content()
+        if request is None:
+            return
+
+        try:
+            fault_name = request.get('name')
+            fault_type = request.get('fault_type')
+            if fault_name and fault_type:
+                self.server.patroni.fault_injector.activate_fault_point(fault_name,
+                                                                        FAULT_TYPES(fault_type),
+                                                                        request.get('start_from'),
+                                                                        request.get('end_after'),
+                                                                        request.get('sleep_time'))
+                self._write_response(200, 'OK')
+            else:
+                self.send_error(400)
+        except ValueError as e:
+            ret = 409 if 'already set' in str(e) else 400
+            self._write_response(ret, f"{e}")
+
+    def do_GET_inject_fault(self):
+        """Get all currently activated points. Only for behave testing."""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+        self._write_json_response(200, self.server.patroni.fault_injector.get_fault_points())
+
+    @check_access
+    def do_DELETE_inject_fault(self):
+        """Reset the given fault point or all the existing points if no name provided
+        Only for behave testing."""
+        if not os.getenv('ENABLE_FAULT_INJECTOR'):
+            self._write_response(403, 'Forbidden')
+            return
+
+        request = self._read_json_content(body_is_optional=True)
+
+        if 'name' in request:
+            if self.server.patroni.fault_injector.deactivate_fault_point(request['name']):
+                self._write_response(200, 'OK')
+                return
+            else:
+                self.send_error(400)
+                return
+
+        self.server.patroni.fault_injector.reset()
+        self._write_response(200, 'OK')
 
     @staticmethod
     def parse_schedule(schedule, action):
