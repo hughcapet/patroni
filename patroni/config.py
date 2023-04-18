@@ -234,6 +234,10 @@ class Config(object):
     def dynamic_configuration(self):
         return deepcopy(self._dynamic_configuration)
 
+    @classmethod
+    def get_default_config(cls):
+        return deepcopy(cls.__DEFAULT_CONFIG)
+
     def _load_config_path(self, path):
         """
         If path is a file, loads the yml file pointed to by path.
@@ -331,7 +335,7 @@ class Config(object):
                 or not is_local and ConfigHandler.CMDLINE_OPTIONS[name][1](value)}
 
     def _safe_copy_dynamic_configuration(self, dynamic_configuration):
-        config = deepcopy(self.__DEFAULT_CONFIG)
+        config = deepcopy(self.get_default_config())
 
         for name, value in dynamic_configuration.items():
             if name == 'postgresql':

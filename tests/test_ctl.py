@@ -5,11 +5,12 @@ import unittest
 
 from click.testing import CliRunner
 from datetime import datetime, timedelta
-from mock import patch, Mock, PropertyMock
+from mock import patch, Mock, MagicMock, PropertyMock
 from patroni.ctl import ctl, load_config, output_members, get_dcs, parse_dcs, \
     get_all_members, get_any_member, get_cursor, query_member, PatroniCtlException, apply_config_changes, \
     format_config_for_editing, show_diff, invoke_editor, format_pg_version, CONFIG_FILE_PATH, PatronictlPrettyTable
 from patroni.dcs.etcd import AbstractEtcdClientWithFailover, Failover
+from patroni.config import Config
 from patroni.psycopg import OperationalError
 from patroni.utils import tzutc
 from prettytable import PrettyTable, ALL
@@ -682,6 +683,43 @@ class TestCtl(unittest.TestCase):
             result = self.runner.invoke(ctl, ['reinit', 'alpha', 'other', '--wait'], input='y\ny')
         self.assertIn("Waiting for reinitialize to complete on: other", result.output)
         self.assertIn("Reinitialize is completed on: other", result.output)
+
+    @patch('patroni.psycopg.connect', psycopg_connect)
+    @patch('builtins.open', MagicMock())
+    @patch('os.makedirs')
+    @patch('yaml.dump')
+    def test_generate_config(self, mock_config_dump, mock_makedir):
+        scope = 'demo'
+        dynamic_config = Config.get_default_config()
+        dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
+        del dynamic_config['standby_cluster']
+        config = {
+            'scope': scope,
+            'bootstrap': {
+                'dcs': dynamic_config
+            },
+            'postgresql': {
+                'parameters': {}
+            }
+        }
+
+        # generate sample config, with the dir creation
+        self.runner.invoke(ctl, ['generate-config', scope, '--path', '/foo/bar.yml'])
+        mock_makedir.assert_called_once()
+        self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+        mock_makedir.reset_mock()
+        mock_config_dump.reset_mock()
+
+        # generate config for a running cluster
+        config['postgresql']['data_dir'] = '/foo/bar/data'
+        config['postgresql']['connect_address'] = 'foo:bar'
+        config['postgresql']['parameters']['log_file_mode'] = '0666'
+        config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
+
+        self.runner.invoke(ctl, ['generate-config', scope, '--dsn', 'host=foo port=bar user=foobar'])
+        mock_makedir.assert_not_called()
+        self.assertEqual(config, mock_config_dump.call_args[0][0])
 
 
 class TestPatronictlPrettyTable(unittest.TestCase):

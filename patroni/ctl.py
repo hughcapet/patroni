@@ -21,7 +21,7 @@ import tempfile
 import time
 import yaml
 
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 from click import ClickException
 from collections import defaultdict
@@ -1372,3 +1372,59 @@ def format_pg_version(version):
         return "{0}.{1}.{2}".format(version // 10000, version // 100 % 100, version % 100)
     else:
         return "{0}.{1}".format(version // 10000, version % 100)
+
+
+@ctl.command('generate-config', help='Generate patroni configuration file. Optionally, for a given running cluster')
+@click.argument('scope')
+@click.option('--path', '-p', help='Result configuration file full path', default='/tmp/patroni.yml')
+@click.option('--dsn', help='Dsn of the cluster to be used as a source')
+def generate_config(scope: str, path: str, dsn: Optional[str]) -> None:
+    from patroni.config import Config
+    from patroni.postgresql.config import parse_dsn
+
+    dynamic_config = Config.get_default_config()
+    dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
+    del dynamic_config['standby_cluster']
+
+    config = {
+        'scope': scope,
+        'bootstrap': {
+            'dcs': dynamic_config
+        },
+        'postgresql': {
+            'parameters': {}
+        }
+    }
+
+    # get non-default GUC values of the given cluster
+    if dsn:
+        from . import psycopg
+        conn = psycopg.connect(dsn=dsn)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, setting \
+                        from pg_settings \
+                        where setting <> reset_val and setting <> '(disabled)' \
+                        or name in ('port', 'listen_addresses', 'cluster_name');")
+
+        # adjust values
+        for p, v in cursor.fetchall():
+            if p in config['bootstrap']['dcs']['postgresql']['parameters']:
+                config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
+            else:
+                config['postgresql']['parameters'][p] = v
+
+        # gather additional info
+        cursor.execute("SELECT setting from pg_settings where name = 'data_directory';")
+        config['postgresql']['data_dir'] = cursor.fetchone()[0] if cursor.rowcount else None
+
+        conn.close()
+
+        parsed_dsn = parse_dsn(dsn)
+        if parsed_dsn:
+            config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
+
+    dir_path = os.path.dirname(path)
+    if dir_path and not os.path.isdir(dir_path):
+        os.makedirs(dir_path)
+    with open(path, 'w') as fd:
+        yaml.dump(config, fd, default_flow_style=False)
