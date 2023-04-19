@@ -111,7 +111,11 @@ class MockCursor(object):
             now = datetime.datetime.now(tzutc)
             self.results = [(now, 0, '', 0, '', False, now, replication_info)]
         elif sql.endswith('name in (\'port\', \'listen_addresses\', \'cluster_name\');'):
-            self.results = [('max_connections', 42), ('log_file_mode', '0666')]
+            self.results = [('max_connections', 42),
+                            ('log_file_mode', '0666'),
+                            ('cluster_name', 'existing_cluster'),
+                            ('port', 1984),
+                            ('listen_addresses', '6.6.6.6')]
         elif sql.startswith('SELECT name, setting'):
             self.results = [('wal_segment_size', '2048', '8kB', 'integer', 'internal'),
                             ('wal_block_size', '8192', None, 'integer', 'internal'),

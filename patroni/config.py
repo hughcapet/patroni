@@ -235,7 +235,7 @@ class Config(object):
         return deepcopy(self._dynamic_configuration)
 
     @classmethod
-    def get_default_config(cls):
+    def get_default_config(cls) -> Dict[str, Any]:
         return deepcopy(cls.__DEFAULT_CONFIG)
 
     def _load_config_path(self, path):

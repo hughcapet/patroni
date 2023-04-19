@@ -1375,16 +1375,34 @@ def format_pg_version(version):
 
 
 @ctl.command('generate-config', help='Generate patroni configuration file. Optionally, for a given running cluster')
-@click.argument('scope')
-@click.option('--path', '-p', help='Result configuration file full path', default='/tmp/patroni.yml')
-@click.option('--dsn', help='Dsn of the cluster to be used as a source')
-def generate_config(scope: str, path: str, dsn: Optional[str]) -> None:
+@click.option('--path', '-p', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
+@click.option('--dsn', help='DSN of the cluster to be used as a source of postgres configuration parameter values')
+@click.option('--scope', help='Scope parameter value for a new cluster. Takes no effect if dsn is provided')
+def generate_config(path: str, dsn: Optional[str], scope: Optional[str] = None) -> None:
+    """Generate a sample Patroni configuration file.
+
+    The created configuration contains:
+    - ``scope``: either the provided option value, ``cluster_name`` GUC value of the source cluster or None
+    - ``bootsrtap.dcs`` section with all the parameters (incl. PG GUCs that can only be adjusted
+        in the dynamic configuration) set to their default values defined by Patroni.
+    - ``postgresql.parameters`` the non-default source cluster's GUCs or an empty dict
+    - ``postgresql.datadir`` if available in the source cluster (requires superuser access)
+    - ``postgresql.connect_address`` if generated from dsn
+    - ``postgresql.listen`` if generated from the source cluster's listen_addresses and port GUC values
+
+    If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
+    of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
+
+    :param path: Full path to the configuration file to be created (/tmp/patroni.yml by default).
+    :param dsn: Optional dsn connection string to the cluster to get non-default GUC values from.
+    :param scope: Optional scope parameter value to write into the configuration.
+                  Only takes effect when no dsn is provided.
+    """
     from patroni.config import Config
     from patroni.postgresql.config import parse_dsn
 
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-    del dynamic_config['standby_cluster']
 
     config = {
         'scope': scope,
@@ -1413,15 +1431,26 @@ def generate_config(scope: str, path: str, dsn: Optional[str]) -> None:
             else:
                 config['postgresql']['parameters'][p] = v
 
-        # gather additional info
+        config['scope'] = config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
+
+        # gather additional info if possible
         cursor.execute("SELECT setting from pg_settings where name = 'data_directory';")
-        config['postgresql']['data_dir'] = cursor.fetchone()[0] if cursor.rowcount else None
+        if cursor.rowcount:
+            config['postgresql']['data_dir'] = cursor.fetchone()[0]
 
         conn.close()
 
         parsed_dsn = parse_dsn(dsn)
         if parsed_dsn:
             config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
+        listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
+        port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
+        config['postgresql']['listen'] = f"{listen_addresses}:{port}"
+
+    del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
+    del config['bootstrap']['dcs']['postgresql']['parameters']['port']
+    del config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
+    del config['bootstrap']['dcs']['standby_cluster']
 
     dir_path = os.path.dirname(path)
     if dir_path and not os.path.isdir(dir_path):

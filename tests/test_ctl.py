@@ -689,10 +689,13 @@ class TestCtl(unittest.TestCase):
     @patch('os.makedirs')
     @patch('yaml.dump')
     def test_generate_config(self, mock_config_dump, mock_makedir):
-        scope = 'demo'
+        scope = 'sample_config'
         dynamic_config = Config.get_default_config()
         dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
         del dynamic_config['standby_cluster']
+        for p in ('cluster_name', 'listen_addresses', 'port'):
+            del dynamic_config['postgresql']['parameters'][p]
+
         config = {
             'scope': scope,
             'bootstrap': {
@@ -704,20 +707,30 @@ class TestCtl(unittest.TestCase):
         }
 
         # generate sample config, with the dir creation
-        self.runner.invoke(ctl, ['generate-config', scope, '--path', '/foo/bar.yml'])
+
+        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--path', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
         mock_makedir.reset_mock()
         mock_config_dump.reset_mock()
 
-        # generate config for a running cluster
-        config['postgresql']['data_dir'] = '/foo/bar/data'
+        # generate config for a running cluster (adjusted values are taken from tests/__init__.py)
+        config['scope'] = 'existing_cluster'
         config['postgresql']['connect_address'] = 'foo:bar'
+        config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters']['log_file_mode'] = '0666'
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
 
-        self.runner.invoke(ctl, ['generate-config', scope, '--dsn', 'host=foo port=bar user=foobar'])
+        # no data_dir available, scope is passed but should be ignored
+        with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+            mock_makedir.assert_not_called()
+            self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+        # generate config for a running cluster, with data_dir, no scope passed
+        config['postgresql']['data_dir'] = '/foo/bar/data'
+        self.runner.invoke(ctl, ['generate-config', '--dsn', 'host=foo port=bar user=foobar'])
         mock_makedir.assert_not_called()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
