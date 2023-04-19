@@ -690,6 +690,25 @@ class TestCtl(unittest.TestCase):
     @patch('yaml.dump')
     def test_generate_config(self, mock_config_dump, mock_makedir):
         scope = 'sample_config'
+        self.maxDiff=None
+        # Wrong input
+        result = self.runner.invoke(ctl, ['generate-config',
+                                          '--scope', scope,
+                                          '--dsn', 'host:foo port:bar user:foobar'])
+        assert result.exit_code == 1
+
+        result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar'])
+        assert result.exit_code == 1
+
+        result = self.runner.invoke(ctl, ['generate-config', '--dsn', 'host=foo port=bar user=foobar'])
+        assert result.exit_code == 2
+
+        with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
+            result = self.runner.invoke(ctl, ['generate-config',
+                                              '--scope', scope,
+                                              '--dsn', 'host=foo port=bar user=foobar'])
+            assert result.exit_code == 1
+
         dynamic_config = Config.get_default_config()
         dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
         del dynamic_config['standby_cluster']
@@ -707,8 +726,7 @@ class TestCtl(unittest.TestCase):
         }
 
         # generate sample config, with the dir creation
-
-        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--path', '/foo/bar.yml'])
+        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--file', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -716,21 +734,21 @@ class TestCtl(unittest.TestCase):
         mock_config_dump.reset_mock()
 
         # generate config for a running cluster (adjusted values are taken from tests/__init__.py)
-        config['scope'] = 'existing_cluster'
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters']['log_file_mode'] = '0666'
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
-
-        # no data_dir available, scope is passed but should be ignored
-        with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-            mock_makedir.assert_not_called()
-            self.assertEqual(config, mock_config_dump.call_args[0][0])
-
-        # generate config for a running cluster, with data_dir, no scope passed
         config['postgresql']['data_dir'] = '/foo/bar/data'
-        self.runner.invoke(ctl, ['generate-config', '--dsn', 'host=foo port=bar user=foobar'])
+        config['postgresql']['authentication'] = {
+            'superuser': {
+                'username': 'foobar',
+                'channel_binding': 'prefer',
+                'gssencmode': 'prefer',
+                'sslmode': 'prefer'
+            }
+        }
+
+        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
         mock_makedir.assert_not_called()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 

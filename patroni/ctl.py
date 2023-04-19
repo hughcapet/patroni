@@ -1375,14 +1375,16 @@ def format_pg_version(version):
 
 
 @ctl.command('generate-config', help='Generate patroni configuration file. Optionally, for a given running cluster')
-@click.option('--path', '-p', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
-@click.option('--dsn', help='DSN of the cluster to be used as a source of postgres configuration parameter values')
-@click.option('--scope', help='Scope parameter value for a new cluster. Takes no effect if dsn is provided')
-def generate_config(path: str, dsn: Optional[str], scope: Optional[str] = None) -> None:
+@click.option('--scope', help='Scope parameter value', required=True)
+@click.option('--file', '-f', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
+@click.option('--dsn',
+              help='DSN string for the cluster to be used as a source of postgres configuration parameter values.\
+                    Superuser connection is required.')
+def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
     """Generate a sample Patroni configuration file.
 
     The created configuration contains:
-    - ``scope``: either the provided option value, ``cluster_name`` GUC value of the source cluster or None
+    - ``scope``: the provided option value
     - ``bootsrtap.dcs`` section with all the parameters (incl. PG GUCs that can only be adjusted
         in the dynamic configuration) set to their default values defined by Patroni.
     - ``postgresql.parameters`` the non-default source cluster's GUCs or an empty dict
@@ -1393,12 +1395,11 @@ def generate_config(path: str, dsn: Optional[str], scope: Optional[str] = None) 
     If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
     of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
 
-    :param path: Full path to the configuration file to be created (/tmp/patroni.yml by default).
-    :param dsn: Optional dsn connection string to the cluster to get non-default GUC values from.
-    :param scope: Optional scope parameter value to write into the configuration.
-                  Only takes effect when no dsn is provided.
+    :param scope: Scope parameter value to write into the configuration.
+    :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
+    :param dsn: Optional dsn string for the cluster to get non-default GUC values from.
     """
-    from patroni.config import Config
+    from patroni.config import _AUTH_ALLOWED_PARAMETERS, Config
     from patroni.postgresql.config import parse_dsn
 
     dynamic_config = Config.get_default_config()
@@ -1414,46 +1415,60 @@ def generate_config(path: str, dsn: Optional[str], scope: Optional[str] = None) 
         }
     }
 
-    # get non-default GUC values of the given cluster
+    # get non-default GUC values from the given cluster
     if dsn:
+        parsed_dsn = parse_dsn(dsn)
+        if not parsed_dsn:
+            click.echo('Failed to parse DSN string')
+            sys.exit(1)
+        if not parsed_dsn.get('user'):
+            click.echo('No user provided in the DSN')
+            sys.exit(1)
+
         from . import psycopg
         conn = psycopg.connect(dsn=dsn)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, setting \
-                        from pg_settings \
-                        where setting <> reset_val and setting <> '(disabled)' \
-                        or name in ('port', 'listen_addresses', 'cluster_name');")
 
-        # adjust values
-        for p, v in cursor.fetchall():
-            if p in config['bootstrap']['dcs']['postgresql']['parameters']:
-                config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
-            else:
-                config['postgresql']['parameters'][p] = v
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (parsed_dsn['user'],))
+            if cur.rowcount < 1:
+                click.echo('The provided user does not have superuser privilege')
+                conn.close()
+                sys.exit(1)
 
-        config['scope'] = config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
+            cur.execute("SELECT name, setting \
+                         from pg_settings \
+                         where setting <> reset_val and setting <> '(disabled)' \
+                         or name in ('port', 'listen_addresses');")
 
-        # gather additional info if possible
-        cursor.execute("SELECT setting from pg_settings where name = 'data_directory';")
-        if cursor.rowcount:
-            config['postgresql']['data_dir'] = cursor.fetchone()[0]
+            # adjust values
+            for p, v in cur.fetchall():
+                if p in config['bootstrap']['dcs']['postgresql']['parameters']:
+                    config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
+                else:
+                    config['postgresql']['parameters'][p] = v
+
+            # gather additional info
+            cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
+            config['postgresql']['data_dir'] = cur.fetchone()[0]
 
         conn.close()
 
-        parsed_dsn = parse_dsn(dsn)
-        if parsed_dsn:
-            config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
+        config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
         listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
         port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
         config['postgresql']['listen'] = f"{listen_addresses}:{port}"
+        config['postgresql']['authentication'] = {
+            'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS}
+        }
+        config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
 
     del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     del config['bootstrap']['dcs']['postgresql']['parameters']['port']
     del config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
     del config['bootstrap']['dcs']['standby_cluster']
 
-    dir_path = os.path.dirname(path)
+    dir_path = os.path.dirname(file)
     if dir_path and not os.path.isdir(dir_path):
         os.makedirs(dir_path)
-    with open(path, 'w') as fd:
+    with open(file, 'w') as fd:
         yaml.dump(config, fd, default_flow_style=False)

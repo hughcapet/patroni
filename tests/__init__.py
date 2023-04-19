@@ -110,10 +110,9 @@ class MockCursor(object):
                                '"state":"streaming","sync_state":"async","sync_priority":0}]'
             now = datetime.datetime.now(tzutc)
             self.results = [(now, 0, '', 0, '', False, now, replication_info)]
-        elif sql.endswith('name in (\'port\', \'listen_addresses\', \'cluster_name\');'):
+        elif sql.endswith('name in (\'port\', \'listen_addresses\');'):
             self.results = [('max_connections', 42),
                             ('log_file_mode', '0666'),
-                            ('cluster_name', 'existing_cluster'),
                             ('port', 1984),
                             ('listen_addresses', '6.6.6.6')]
         elif sql.startswith('SELECT name, setting'):
@@ -139,6 +138,8 @@ class MockCursor(object):
             self.results = [(1, 0, 'host1', 5432, 'primary'), (2, 1, 'host2', 5432, 'primary')]
         elif sql.endswith('where name = \'data_directory\';'):
             self.results = [('/foo/bar/data',)]
+        elif sql.startswith('SELECT 1'):
+            self.results = [(1,)]
             self.rowcount = 1
         else:
             self.results = [(None, None, None, None, None, None, None, None, None, None)]
