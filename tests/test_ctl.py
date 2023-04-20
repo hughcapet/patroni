@@ -690,7 +690,7 @@ class TestCtl(unittest.TestCase):
     @patch('yaml.dump')
     def test_generate_config(self, mock_config_dump, mock_makedir):
         scope = 'sample_config'
-        self.maxDiff=None
+        self.maxDiff = None
         # Wrong input
         result = self.runner.invoke(ctl, ['generate-config',
                                           '--scope', scope,
@@ -709,6 +709,7 @@ class TestCtl(unittest.TestCase):
                                               '--dsn', 'host=foo port=bar user=foobar'])
             assert result.exit_code == 1
 
+        no_value_msg = '#FIXME'
         dynamic_config = Config.get_default_config()
         dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
         del dynamic_config['standby_cluster']
@@ -721,7 +722,12 @@ class TestCtl(unittest.TestCase):
                 'dcs': dynamic_config
             },
             'postgresql': {
-                'parameters': {}
+                'connect_address': no_value_msg,
+                'listen': no_value_msg,
+                'pg_hba': ['host all all 0.0.0.0/0 md5', 'host replication replicator 127.0.0.1/32 md5'],
+                'parameters': None,
+                'authentication': {'superuser': {'username': 'postgres', 'password': no_value_msg},
+                                   'replication': {'username': 'replicator', 'password': no_value_msg}}
             }
         }
 
@@ -736,17 +742,16 @@ class TestCtl(unittest.TestCase):
         # generate config for a running cluster (adjusted values are taken from tests/__init__.py)
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
-        config['postgresql']['parameters']['log_file_mode'] = '0666'
+        config['postgresql']['parameters'] = {'log_file_mode': '0666'}
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
         config['postgresql']['data_dir'] = '/foo/bar/data'
-        config['postgresql']['authentication'] = {
-            'superuser': {
-                'username': 'foobar',
-                'channel_binding': 'prefer',
-                'gssencmode': 'prefer',
-                'sslmode': 'prefer'
-            }
+        config['postgresql']['authentication']['superuser'] = {
+            'username': 'foobar',
+            'channel_binding': 'prefer',
+            'gssencmode': 'prefer',
+            'sslmode': 'prefer'
         }
+        config['postgresql']['authentication']['replication'] = {'username': no_value_msg, 'password': no_value_msg}
 
         self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
         mock_makedir.assert_not_called()

@@ -1384,13 +1384,17 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
     """Generate a sample Patroni configuration file.
 
     The created configuration contains:
-    - ``scope``: the provided option value
+    - ``scope`` the provided option value
     - ``bootsrtap.dcs`` section with all the parameters (incl. PG GUCs that can only be adjusted
         in the dynamic configuration) set to their default values defined by Patroni.
     - ``postgresql.parameters`` the non-default source cluster's GUCs or an empty dict
-    - ``postgresql.datadir`` if available in the source cluster (requires superuser access)
+    - ``postgresql.datadir``
+    - ``postgresql.listen`` source cluster's listen_addresses and port GUC values
     - ``postgresql.connect_address`` if generated from dsn
-    - ``postgresql.listen`` if generated from the source cluster's listen_addresses and port GUC values
+    - ``postgresql.authentication`` with superuser and replication users defined (if possible, usernames
+        are set from the respective ENV variables, oterwise the default 'postgres' and 'replicator' values
+        are used). If DSN was provided, it is used to define the superuser values.
+    - ``postgresql.pg_hba`` defaults or the lines gathered from the source cluster's hba_file
 
     If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
     of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
@@ -1402,16 +1406,18 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
     from patroni.config import _AUTH_ALLOWED_PARAMETERS, Config
     from patroni.postgresql.config import parse_dsn
 
+    no_value_msg = '#FIXME'
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-
     config = {
         'scope': scope,
         'bootstrap': {
             'dcs': dynamic_config
         },
         'postgresql': {
-            'parameters': {}
+            'parameters': None,
+            'connect_address': no_value_msg,
+            'listen': no_value_msg
         }
     }
 
@@ -1441,6 +1447,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
                          or name in ('port', 'listen_addresses');")
 
             # adjust values
+            config['postgresql']['parameters'] = dict()
             for p, v in cur.fetchall():
                 if p in config['bootstrap']['dcs']['postgresql']['parameters']:
                     config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
@@ -1451,22 +1458,54 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
             cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
             config['postgresql']['data_dir'] = cur.fetchone()[0]
 
+            cur.execute("SELECT pg_read_file((SELECT setting FROM pg_settings WHERE name='hba_file'));")
+            pg_hba = cur.fetchone()[0]
+            config['postgresql']['pg_hba'] = [i for i in pg_hba.split(chr(10))
+                                              if i.startswith(('local',
+                                                               'host',
+                                                               'hostssl',
+                                                               'hostnossl',
+                                                               'hostgssenc',
+                                                               'hostnogssenc'))]
+
         conn.close()
 
         config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
         listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
         port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
-        config['postgresql']['listen'] = f"{listen_addresses}:{port}"
+        config['postgresql']['listen'] = f'{listen_addresses}:{port}'
         config['postgresql']['authentication'] = {
-            'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS}
+            'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS},
+            'replication': {'username': no_value_msg, 'password': no_value_msg}
         }
         config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
+    else:  # no source cluster
+        replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
+        config['postgresql']['authentication'] = {
+            'superuser': {
+                'username': os.getenv('PATRONI_SUPERUSER_USERNAME', 'postgres'),
+                'password': no_value_msg
+            },
+            'replication': {
+                'username': replicator,
+                'password': no_value_msg
+            }
+        }
+        config['postgresql']['pg_hba'] = [
+            'host all all 0.0.0.0/0 md5',
+            f'host replication {replicator} 127.0.0.1/32 md5'
+        ]
 
     del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     del config['bootstrap']['dcs']['postgresql']['parameters']['port']
     del config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
     del config['bootstrap']['dcs']['standby_cluster']
 
+    # no value instead of 'none' in the parsed yaml
+    yaml.add_representer(
+        type(None),
+        lambda dumper, _: dumper.represent_scalar(u'tag:yaml.org,2002:null', '')
+    )
     dir_path = os.path.dirname(file)
     if dir_path and not os.path.isdir(dir_path):
         os.makedirs(dir_path)
