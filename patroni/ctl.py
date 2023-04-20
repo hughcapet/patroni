@@ -1378,30 +1378,30 @@ def format_pg_version(version):
 @click.option('--scope', help='Scope parameter value', required=True)
 @click.option('--file', '-f', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
 @click.option('--dsn',
-              help='DSN string for the cluster to be used as a source of postgres configuration parameter values.\
+              help='DSN string of the instance to be used as a source of postgres configuration parameter values.\
                     Superuser connection is required.')
 def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
-    """Generate a sample Patroni configuration file.
+    """Generate Patroni configuration file
 
     The created configuration contains:
     - ``scope`` the provided option value
     - ``bootsrtap.dcs`` section with all the parameters (incl. PG GUCs that can only be adjusted
         in the dynamic configuration) set to their default values defined by Patroni.
-    - ``postgresql.parameters`` the non-default source cluster's GUCs or an empty dict
+    - ``postgresql.parameters`` the non-default source instance's GUCs or an empty dict
     - ``postgresql.datadir``
-    - ``postgresql.listen`` source cluster's listen_addresses and port GUC values
+    - ``postgresql.listen`` source instance's listen_addresses and port GUC values
     - ``postgresql.connect_address`` if generated from dsn
     - ``postgresql.authentication`` with superuser and replication users defined (if possible, usernames
         are set from the respective ENV variables, oterwise the default 'postgres' and 'replicator' values
         are used). If DSN was provided, it is used to define the superuser values.
-    - ``postgresql.pg_hba`` defaults or the lines gathered from the source cluster's hba_file
+    - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
 
     If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
     of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
 
     :param scope: Scope parameter value to write into the configuration.
     :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
-    :param dsn: Optional dsn string for the cluster to get non-default GUC values from.
+    :param dsn: Optional dsn string for the local instance to get non-default GUC values from.
     """
     from patroni.config import _AUTH_ALLOWED_PARAMETERS, Config
     from patroni.postgresql.config import parse_dsn
@@ -1421,7 +1421,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
         }
     }
 
-    # get non-default GUC values from the given cluster
+    # get non-default GUC values from the given instance
     if dsn:
         parsed_dsn = parse_dsn(dsn)
         if not parsed_dsn:
@@ -1479,7 +1479,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
             'replication': {'username': no_value_msg, 'password': no_value_msg}
         }
         config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
-    else:  # no source cluster
+    else:  # no source instance
         replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
         config['postgresql']['authentication'] = {
             'superuser': {

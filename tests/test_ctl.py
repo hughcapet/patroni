@@ -739,7 +739,7 @@ class TestCtl(unittest.TestCase):
         mock_makedir.reset_mock()
         mock_config_dump.reset_mock()
 
-        # generate config for a running cluster (adjusted values are taken from tests/__init__.py)
+        # generate config for a running instance (adjusted values are taken from tests/__init__.py)
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'log_file_mode': '0666'}
