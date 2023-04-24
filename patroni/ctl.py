@@ -15,6 +15,7 @@ import logging
 import os
 import random
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -36,7 +37,7 @@ except ImportError:  # pragma: no cover
 
 from .dcs import get_dcs as _get_dcs
 from .exceptions import PatroniException
-from .postgresql.misc import postgres_version_to_int
+from .postgresql.misc import postgres_version_to_int, postgres_major_version_to_int
 from .utils import cluster_as_json, patch_config, polling_loop
 from .request import PatroniRequest
 from .version import __version__
@@ -1374,26 +1375,111 @@ def format_pg_version(version):
         return "{0}.{1}".format(version // 10000, version % 100)
 
 
+def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_value_msg: str) -> None:
+    from patroni.postgresql.config import parse_dsn
+    from patroni.config import _AUTH_ALLOWED_PARAMETERS
+
+    parsed_dsn = parse_dsn(dsn)
+    if not parsed_dsn:
+        raise PatroniCtlException('Failed to parse DSN string')
+    if not parsed_dsn.get('user'):
+        raise PatroniCtlException('No user provided in the DSN')
+
+    from . import psycopg
+    conn = psycopg.connect(dsn=dsn)
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (parsed_dsn['user'],))
+        if cur.rowcount < 1:
+            conn.close()
+            raise PatroniCtlException('The provided user does not have superuser privilege')
+
+        cur.execute("SELECT name, setting \
+                     from pg_settings \
+                     where setting <> reset_val and setting <> '(disabled)' \
+                     or name in ('port', 'listen_addresses');")
+
+        # adjust values
+        config['postgresql']['parameters'] = dict()
+        for p, v in cur.fetchall():
+            if p in config['bootstrap']['dcs']['postgresql']['parameters']:
+                config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
+            else:
+                config['postgresql']['parameters'][p] = v
+
+        # gather additional info
+        cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
+        config['postgresql']['data_dir'] = cur.fetchone()[0]
+
+        cur.execute("SELECT pg_read_file((SELECT setting FROM pg_settings WHERE name='hba_file'));")
+        pg_hba = cur.fetchone()[0]
+        config['postgresql']['pg_hba'] = [i for i in pg_hba.split(chr(10))
+                                          if i.startswith(('local',
+                                                           'host',
+                                                           'hostssl',
+                                                           'hostnossl',
+                                                           'hostgssenc',
+                                                           'hostnogssenc'))]
+
+    conn.close()
+
+    if not config['bootstrap']['dcs']['postgresql']['bin_dir']:
+        # obtain bin_dir of the running instance
+        if sys.platform.startswith('linux'):
+            postmaster_pid = None
+            try:
+                with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
+                    postmaster_pid = f.readline()
+                    if not postmaster_pid:
+                        raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
+                    postmaster_pid = postmaster_pid.strip()
+            except OSError as e:
+                raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
+            try:
+                config['bootstrap']['dcs']['postgresql']['bin_dir'] =\
+                    os.path.dirname(os.readlink(f'/proc/{postmaster_pid}/exe'))
+            except OSError as e:
+                raise PatroniCtlException(f'Error reading /proc/<postmaster_pid>/exe link: {e}')
+
+    config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
+    listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
+    port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
+    config['postgresql']['listen'] = f'{listen_addresses}:{port}'
+
+    config['postgresql']['authentication'] = {
+        'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS},
+        'replication': {'username': no_value_msg, 'password': no_value_msg}
+    }
+    config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
+
+
 @ctl.command('generate-config', help='Generate patroni configuration file. Optionally, for a given running cluster')
 @click.option('--scope', help='Scope parameter value', required=True)
 @click.option('--file', '-f', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
 @click.option('--dsn',
               help='DSN string of the instance to be used as a source of postgres configuration parameter values.\
                     Superuser connection is required.')
-def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
+@click.option('--bin-dir', '-b', help='Full path to the directory with PostgreSQL libraries')
+def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional[str]) -> None:
     """Generate Patroni configuration file
 
     The created configuration contains:
-    - ``scope`` the provided option value
-    - ``bootsrtap.dcs`` section with all the parameters (incl. PG GUCs that can only be adjusted
+    - ``scope``: the provided option value
+    - ``name``: hostname
+    - ``bootsrtap.dcs``: section with all the parameters (incl. PG GUCs that can only be adjusted
         in the dynamic configuration) set to their default values defined by Patroni.
-    - ``postgresql.parameters`` the non-default source instance's GUCs or an empty dict
-    - ``postgresql.datadir``
-    - ``postgresql.listen`` source instance's listen_addresses and port GUC values
-    - ``postgresql.connect_address`` if generated from dsn
-    - ``postgresql.authentication`` with superuser and replication users defined (if possible, usernames
-        are set from the respective ENV variables, oterwise the default 'postgres' and 'replicator' values
-        are used). If DSN was provided, it is used to define the superuser values.
+    - ``postgresql.parameters``: the non-default source instance's GUCs or an empty dict
+    - ``postgresql.bin_dir``:
+    - ``postgresql.datadir``:
+    - ``postgresql.listen``: source instance's listen_addresses and port GUC values
+    - ``postgresql.connect_address``: if generated from dsn
+    - ``postgresql.authentication``:
+        - superuser and replication users defined (if possible, usernames are set from the respective ENV variables,
+          otherwise the default 'postgres' and 'replicator' values are used). If DSN was provided, it is used to define
+          the superuser name.
+        - rewind user defined if no DSN provided, PG version can be defined and PG version is 11+
+          (if possible, username is set from the respective ENV var)
+    - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True, if PG version is 11+
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
 
     If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
@@ -1402,15 +1488,19 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
     :param scope: Scope parameter value to write into the configuration.
     :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
     :param dsn: Optional dsn string for the local instance to get non-default GUC values from.
+    :param bin_dir: Optional path to Postgres binaries. Prefered way to get the PG version.
     """
-    from patroni.config import _AUTH_ALLOWED_PARAMETERS, Config
-    from patroni.postgresql.config import parse_dsn
+    from patroni.config import Config
+    from patroni.validator import get_major_version
 
     no_value_msg = '#FIXME'
+    pg_version = None
+
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
     config = {
         'scope': scope,
+        'name': socket.gethostname(),
         'bootstrap': {
             'dcs': dynamic_config
         },
@@ -1420,65 +1510,11 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
             'listen': no_value_msg
         }
     }
+    if bin_dir:
+        config['bootstrap']['dcs']['postgresql']['bin_dir'] = bin_dir
 
-    # get non-default GUC values from the given instance
     if dsn:
-        parsed_dsn = parse_dsn(dsn)
-        if not parsed_dsn:
-            click.echo('Failed to parse DSN string')
-            sys.exit(1)
-        if not parsed_dsn.get('user'):
-            click.echo('No user provided in the DSN')
-            sys.exit(1)
-
-        from . import psycopg
-        conn = psycopg.connect(dsn=dsn)
-
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (parsed_dsn['user'],))
-            if cur.rowcount < 1:
-                click.echo('The provided user does not have superuser privilege')
-                conn.close()
-                sys.exit(1)
-
-            cur.execute("SELECT name, setting \
-                         from pg_settings \
-                         where setting <> reset_val and setting <> '(disabled)' \
-                         or name in ('port', 'listen_addresses');")
-
-            # adjust values
-            config['postgresql']['parameters'] = dict()
-            for p, v in cur.fetchall():
-                if p in config['bootstrap']['dcs']['postgresql']['parameters']:
-                    config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
-                else:
-                    config['postgresql']['parameters'][p] = v
-
-            # gather additional info
-            cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
-            config['postgresql']['data_dir'] = cur.fetchone()[0]
-
-            cur.execute("SELECT pg_read_file((SELECT setting FROM pg_settings WHERE name='hba_file'));")
-            pg_hba = cur.fetchone()[0]
-            config['postgresql']['pg_hba'] = [i for i in pg_hba.split(chr(10))
-                                              if i.startswith(('local',
-                                                               'host',
-                                                               'hostssl',
-                                                               'hostnossl',
-                                                               'hostgssenc',
-                                                               'hostnogssenc'))]
-
-        conn.close()
-
-        config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
-        listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
-        port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
-        config['postgresql']['listen'] = f'{listen_addresses}:{port}'
-        config['postgresql']['authentication'] = {
-            'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS},
-            'replication': {'username': no_value_msg, 'password': no_value_msg}
-        }
-        config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
+        enrich_config_from_running_instance(dsn, config, no_value_msg)
     else:  # no source instance
         replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
         config['postgresql']['authentication'] = {
@@ -1495,6 +1531,34 @@ def generate_config(scope: str, file: str, dsn: Optional[str]) -> None:
             'host all all 0.0.0.0/0 md5',
             f'host replication {replicator} 127.0.0.1/32 md5'
         ]
+
+    if bin_dir:
+        # obtain version from the binary
+        pg_version = postgres_major_version_to_int(get_major_version(bin_dir))
+    elif dsn:
+        # obtain PostgreSQL version of the running instance if bin_dir is not provided
+        try:
+            with open(f"{config['postgresql']['data_dir']}/PG_VERSION") as f:
+                pg_version = f.readline()
+                if not pg_version:
+                    raise PatroniCtlException('Failed to obtain PostgreSQL version from the PG_VERSION file')
+                pg_version = postgres_major_version_to_int(pg_version.strip())
+        except OSError as e:
+            raise PatroniCtlException(f'Error reading PG_VERSION file: {e}')
+
+    # add version-specific configuration
+    if pg_version:
+        if dynamic_config['postgresql']['parameters'].keys().isdisjoint({'wal_keep_size', 'wal_keep_segments'}):
+            from patroni.postgresql.config import ConfigHandler
+            wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
+            config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
+                ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
+        if not dsn and pg_version >= 110000:
+            config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
+            config['postgresql']['authentication']['rewind'] = {
+                'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
+                'password': no_value_msg
+            }
 
     del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     del config['bootstrap']['dcs']['postgresql']['parameters']['port']

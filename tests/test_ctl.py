@@ -5,7 +5,7 @@ import unittest
 
 from click.testing import CliRunner
 from datetime import datetime, timedelta
-from mock import patch, Mock, MagicMock, PropertyMock
+from mock import mock_open, patch, Mock, MagicMock, PropertyMock
 from patroni.ctl import ctl, load_config, output_members, get_dcs, parse_dcs, \
     get_all_members, get_any_member, get_cursor, query_member, PatroniCtlException, apply_config_changes, \
     format_config_for_editing, show_diff, invoke_editor, format_pg_version, CONFIG_FILE_PATH, PatronictlPrettyTable
@@ -686,23 +686,28 @@ class TestCtl(unittest.TestCase):
 
     @patch('patroni.psycopg.connect', psycopg_connect)
     @patch('builtins.open', MagicMock())
+    @patch('socket.gethostname', Mock(return_value='testhost'))
     @patch('os.makedirs')
     @patch('yaml.dump')
     def test_generate_config(self, mock_config_dump, mock_makedir):
         scope = 'sample_config'
         self.maxDiff = None
-        # Wrong input
+        # 1. Wrong input
+        # 1.1 Wrong DSN format
         result = self.runner.invoke(ctl, ['generate-config',
                                           '--scope', scope,
                                           '--dsn', 'host:foo port:bar user:foobar'])
         assert result.exit_code == 1
 
+        # 1.2 No user
         result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar'])
         assert result.exit_code == 1
 
+        # 1.3 No scope
         result = self.runner.invoke(ctl, ['generate-config', '--dsn', 'host=foo port=bar user=foobar'])
         assert result.exit_code == 2
 
+        # 1.4 User is not a superuser
         with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
             result = self.runner.invoke(ctl, ['generate-config',
                                               '--scope', scope,
@@ -718,6 +723,7 @@ class TestCtl(unittest.TestCase):
 
         config = {
             'scope': scope,
+            'name': 'testhost',
             'bootstrap': {
                 'dcs': dynamic_config
             },
@@ -731,7 +737,8 @@ class TestCtl(unittest.TestCase):
             }
         }
 
-        # generate sample config, with the dir creation
+        # 2. Sample config without target instance
+        # 2.1 With a dir creation
         self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--file', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
@@ -739,7 +746,31 @@ class TestCtl(unittest.TestCase):
         mock_makedir.reset_mock()
         mock_config_dump.reset_mock()
 
-        # generate config for a running instance (adjusted values are taken from tests/__init__.py)
+        # 2.2 With bin_dir provided
+        config['bootstrap']['dcs']['postgresql']['bin_dir'] = '/foo/bar'
+
+        # 2.2.1 pg_version < 13
+        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
+        with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--bin-dir', '/foo/bar'])
+            mock_makedir.assert_not_called()
+            self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+        mock_makedir.reset_mock()
+        mock_config_dump.reset_mock()
+
+        # 2.2.1 pg_version >= 13
+        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
+        config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
+        config['postgresql']['authentication']['rewind'] = {'username': 'rewind_user', 'password': no_value_msg}
+        with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--bin-dir', '/foo/bar'])
+            self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+        mock_config_dump.reset_mock()
+
+        # 3. generate config for a running instance (adjusted values are taken from tests/__init__.py)
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'log_file_mode': '0666'}
@@ -752,10 +783,38 @@ class TestCtl(unittest.TestCase):
             'sslmode': 'prefer'
         }
         config['postgresql']['authentication']['replication'] = {'username': no_value_msg, 'password': no_value_msg}
+        del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
+        del config['postgresql']['authentication']['rewind']
 
-        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-        mock_makedir.assert_not_called()
-        self.assertEqual(config, mock_config_dump.call_args[0][0])
+        # 3.1 bin_dir provided
+        # 3.1.1 pg_version < 13
+        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
+        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
+        with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar',
+                                     '--bin-dir', '/foo/bar'])
+            self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+        mock_config_dump.reset_mock()
+
+        # 3.2 no bin_dir provided
+        config['bootstrap']['dcs']['postgresql']['bin_dir'] = ''
+
+        # 3.2.1 pg_version > 13
+        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
+        with patch('builtins.open', mock_open(read_data='13.4')):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+            self.assertEqual(config, mock_config_dump.call_args[0][0])
+        mock_config_dump.reset_mock()
+        # 3.2.2 garbage in PG_VERSION file
+        with patch('builtins.open', mock_open(read_data='')):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+            assert result.exit_code == 1
+        # 3.2.3 failed to open PG_VERSION file
+        with patch('builtins.open', Mock(side_effect=IOError)):
+            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+            assert result.exit_code == 1
 
 
 class TestPatronictlPrettyTable(unittest.TestCase):
