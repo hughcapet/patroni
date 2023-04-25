@@ -1425,21 +1425,20 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
 
     if not config['bootstrap']['dcs']['postgresql']['bin_dir']:
         # obtain bin_dir of the running instance
-        if sys.platform.startswith('linux'):
-            postmaster_pid = None
-            try:
-                with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
-                    postmaster_pid = f.readline()
-                    if not postmaster_pid:
-                        raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
-                    postmaster_pid = postmaster_pid.strip()
-            except OSError as e:
-                raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
-            try:
-                config['bootstrap']['dcs']['postgresql']['bin_dir'] =\
-                    os.path.dirname(os.readlink(f'/proc/{postmaster_pid}/exe'))
-            except OSError as e:
-                raise PatroniCtlException(f'Error reading /proc/<postmaster_pid>/exe link: {e}')
+        postmaster_pid = None
+        try:
+            with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
+                postmaster_pid = f.readline()
+                if not postmaster_pid:
+                    raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
+                postmaster_pid = int(postmaster_pid.strip())
+        except OSError as e:
+            raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
+        try:
+            import psutil
+            config['bootstrap']['dcs']['postgresql']['bin_dir'] = psutil.Process(postmaster_pid).exe()
+        except psutil.NoSuchProcess:
+            raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
 
     config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']

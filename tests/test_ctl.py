@@ -1,6 +1,7 @@
 import etcd
 import mock
 import os
+import psutil
 import unittest
 
 from click.testing import CliRunner
@@ -800,20 +801,53 @@ class TestCtl(unittest.TestCase):
         # 3.2 no bin_dir provided
         config['bootstrap']['dcs']['postgresql']['bin_dir'] = ''
 
-        # 3.2.1 pg_version > 13
-        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
-        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-        with patch('builtins.open', mock_open(read_data='13.4')):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-            self.assertEqual(config, mock_config_dump.call_args[0][0])
-        mock_config_dump.reset_mock()
-        # 3.2.2 garbage in PG_VERSION file
-        with patch('builtins.open', mock_open(read_data='')):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-            assert result.exit_code == 1
-        # 3.2.3 failed to open PG_VERSION file
-        with patch('builtins.open', Mock(side_effect=IOError)):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+        with patch('psutil.Process.__init__', Mock(return_value=None)),\
+             patch('psutil.Process.exe', Mock(return_value='/bar/foo')):
+
+            # 3.2.1 pg_version > 13
+            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
+            config['bootstrap']['dcs']['postgresql']['bin_dir'] = '/bar/foo'
+
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          mock_open(read_data='13.4')(),
+                                                          mock_open()()])):
+                self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+                mock_config_dump.reset_mock()
+
+            # 3.2.2 empty PG_VERSION file
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          mock_open(read_data='')()])):
+                self.runner.invoke(ctl, ['generate-config',
+                                         '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                assert result.exit_code == 1
+
+            # 3.2.3 failed to open PG_VERSION file
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          OSError])):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                assert result.exit_code == 1
+
+            # 3.2.4 empty postmaster.pid
+            with patch('builtins.open', Mock(return_value=mock_open(read_data='')())):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                assert result.exit_code == 1
+
+            # 3.2.5 Failed to open postmaster.pid
+            with patch('builtins.open', Mock(side_effect=OSError)):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                assert result.exit_code == 1
+
+        # 3.2.6 Invalid postmaster pid
+        with patch('psutil.Process.__init__', Mock(return_value=None)),\
+             patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
+            result = self.runner.invoke(ctl, ['generate-config',
+                                              '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
             assert result.exit_code == 1
 
 
