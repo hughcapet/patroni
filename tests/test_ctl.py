@@ -783,15 +783,19 @@ class TestCtl(unittest.TestCase):
             'gssencmode': 'prefer',
             'sslmode': 'prefer'
         }
+
         config['postgresql']['authentication']['replication'] = {'username': no_value_msg, 'password': no_value_msg}
         del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
         del config['postgresql']['authentication']['rewind']
+
+        hba_mock = mock_open(read_data='\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5']))
 
         # 3.1 bin_dir provided
         # 3.1.1 pg_version < 13
         del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
-        with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
+        with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")),\
+             patch('builtins.open', Mock(return_value=hba_mock())):
             self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar',
                                      '--bin-dir', '/foo/bar'])
             self.assertEqual(config, mock_config_dump.call_args[0][0])
@@ -810,6 +814,7 @@ class TestCtl(unittest.TestCase):
             config['bootstrap']['dcs']['postgresql']['bin_dir'] = '/bar/foo'
 
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          hba_mock(),
                                                           mock_open(read_data='13.4')(),
                                                           mock_open()()])):
                 self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
@@ -819,6 +824,7 @@ class TestCtl(unittest.TestCase):
 
             # 3.2.2 empty PG_VERSION file
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          hba_mock(),
                                                           mock_open(read_data='')()])):
                 self.runner.invoke(ctl, ['generate-config',
                                          '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
@@ -826,6 +832,7 @@ class TestCtl(unittest.TestCase):
 
             # 3.2.3 failed to open PG_VERSION file
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          hba_mock(),
                                                           OSError])):
                 result = self.runner.invoke(ctl, ['generate-config',
                                                   '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
@@ -843,7 +850,14 @@ class TestCtl(unittest.TestCase):
                                                   '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
                 assert result.exit_code == 1
 
-        # 3.2.6 Invalid postmaster pid
+            # 3.2.6 Failed to open pg_hba
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          OSError])):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                assert result.exit_code == 1
+
+        # 3.2.7 Invalid postmaster pid
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
              patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
             result = self.runner.invoke(ctl, ['generate-config',

@@ -1411,16 +1411,6 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
         cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
         config['postgresql']['data_dir'] = cur.fetchone()[0]
 
-        cur.execute("SELECT pg_read_file((SELECT setting FROM pg_settings WHERE name='hba_file'));")
-        pg_hba = cur.fetchone()[0]
-        config['postgresql']['pg_hba'] = [i for i in pg_hba.split(chr(10))
-                                          if i.startswith(('local',
-                                                           'host',
-                                                           'hostssl',
-                                                           'hostnossl',
-                                                           'hostgssenc',
-                                                           'hostnogssenc'))]
-
     conn.close()
 
     if not config['bootstrap']['dcs']['postgresql']['bin_dir']:
@@ -1444,6 +1434,20 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
+
+    hba_file = config['postgresql']['parameters']['hba_file'] \
+        if 'hba_file' in config['postgresql']['parameters'] else f"{config['postgresql']['data_dir']}/pg_hba.conf"
+    try:
+        with open(hba_file, 'r') as f:
+            config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
+                                              if i.startswith(('local',
+                                                               'host',
+                                                               'hostssl',
+                                                               'hostnossl',
+                                                               'hostgssenc',
+                                                               'hostnogssenc'))]
+    except OSError as e:
+        raise PatroniCtlException(f'Failed to read hba_file: {e}')
 
     config['postgresql']['authentication'] = {
         'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS},
