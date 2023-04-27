@@ -15,7 +15,7 @@ from typing import Any, Union, Iterator, List, Optional as OptionalType
 
 from .utils import split_host_port, data_directory_is_empty
 from .dcs import dcs_modules
-from .exceptions import ConfigParseError
+from .exceptions import ConfigParseError, PatroniException
 
 
 def data_directory_empty(data_dir: str) -> bool:
@@ -195,7 +195,10 @@ def get_major_version(bin_dir: OptionalType[str] = None) -> str:
         binary = 'postgres'
     else:
         binary = os.path.join(bin_dir, 'postgres')
-    version = subprocess.check_output([binary, '--version']).decode()
+    try:
+        version = subprocess.check_output([binary, '--version']).decode()
+    except OSError as e:
+        raise PatroniException(f'Failed to get postgres version: {e}')
     version = re.match(r'^[^\s]+ [^\s]+ (\d+)(\.(\d+))?', version)
     return '.'.join([version.group(1), version.group(3)]) if int(version.group(1)) < 10 else version.group(1)
 

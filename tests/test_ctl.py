@@ -734,7 +734,8 @@ class TestCtl(unittest.TestCase):
                 'pg_hba': ['host all all 0.0.0.0/0 md5', 'host replication replicator 127.0.0.1/32 md5'],
                 'parameters': None,
                 'authentication': {'superuser': {'username': 'postgres', 'password': no_value_msg},
-                                   'replication': {'username': 'replicator', 'password': no_value_msg}}
+                                   'replication': {'username': 'replicator', 'password': no_value_msg}},
+                'bin_dir': ''
             }
         }
 
@@ -748,7 +749,7 @@ class TestCtl(unittest.TestCase):
         mock_config_dump.reset_mock()
 
         # 2.2 With bin_dir provided
-        config['bootstrap']['dcs']['postgresql']['bin_dir'] = '/foo/bar'
+        config['postgresql']['bin_dir'] = '/foo/bar'
 
         # 2.2.1 pg_version < 13
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
@@ -810,15 +811,13 @@ class TestCtl(unittest.TestCase):
         mock_config_dump.reset_mock()
 
         # 3.2 no bin_dir provided
-        config['bootstrap']['dcs']['postgresql']['bin_dir'] = ''
 
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
-             patch('psutil.Process.exe', Mock(return_value='/bar/foo')):
+             patch('psutil.Process.exe', Mock(return_value='/foo/bar')):
 
             # 3.2.1 pg_version > 13
             del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
             config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-            config['bootstrap']['dcs']['postgresql']['bin_dir'] = '/bar/foo'
 
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           hba_mock(),

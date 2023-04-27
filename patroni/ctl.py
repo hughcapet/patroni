@@ -1420,7 +1420,7 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
 
     conn.close()
 
-    if not config['bootstrap']['dcs']['postgresql']['bin_dir']:
+    if not config['postgresql']['bin_dir']:
         # obtain bin_dir of the running instance
         postmaster_pid = None
         try:
@@ -1433,7 +1433,7 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
             raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
         try:
             import psutil
-            config['bootstrap']['dcs']['postgresql']['bin_dir'] = psutil.Process(postmaster_pid).exe()
+            config['postgresql']['bin_dir'] = psutil.Process(postmaster_pid).exe()
         except psutil.NoSuchProcess:
             raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
 
@@ -1517,11 +1517,12 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
         'postgresql': {
             'parameters': None,
             'connect_address': no_value_msg,
-            'listen': no_value_msg
-        }
+            'listen': no_value_msg,
+            'bin_dir': ''
+        },
     }
     if bin_dir:
-        config['bootstrap']['dcs']['postgresql']['bin_dir'] = bin_dir
+        config['postgresql']['bin_dir'] = bin_dir
 
     if dsn:
         enrich_config_from_running_instance(dsn, config, no_value_msg)
@@ -1544,7 +1545,10 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
 
     if bin_dir:
         # obtain version from the binary
-        pg_version = postgres_major_version_to_int(get_major_version(bin_dir))
+        try:
+            pg_version = postgres_major_version_to_int(get_major_version(bin_dir))
+        except PatroniException as e:
+            raise PatroniCtlException(str(e))
     elif dsn:
         # obtain PostgreSQL version of the running instance if bin_dir is not provided
         try:
