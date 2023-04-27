@@ -774,8 +774,15 @@ class TestCtl(unittest.TestCase):
         # 3. generate config for a running instance (adjusted values are taken from tests/__init__.py)
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
-        config['postgresql']['parameters'] = {'log_file_mode': '0666'}
+        config['postgresql']['parameters'] = {'config_file': '/config/file/path',
+                                              'hba_file': '/hba/file/path',
+                                              'ident_file': '/ident/file/path'}
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
+        config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
+        config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
+        config['bootstrap']['dcs']['postgresql']['parameters']['max_wal_senders'] = 37
+        config['bootstrap']['dcs']['postgresql']['parameters']['wal_level'] = 'replica'
+
         config['postgresql']['data_dir'] = '/foo/bar/data'
         config['postgresql']['authentication']['superuser'] = {
             'username': 'foobar',
@@ -826,8 +833,8 @@ class TestCtl(unittest.TestCase):
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           hba_mock(),
                                                           mock_open(read_data='')()])):
-                self.runner.invoke(ctl, ['generate-config',
-                                         '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
                 assert result.exit_code == 1
 
             # 3.2.3 failed to open PG_VERSION file

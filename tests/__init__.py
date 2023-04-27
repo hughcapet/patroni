@@ -110,11 +110,20 @@ class MockCursor(object):
                                '"state":"streaming","sync_state":"async","sync_priority":0}]'
             now = datetime.datetime.now(tzutc)
             self.results = [(now, 0, '', 0, '', False, now, replication_info)]
-        elif sql.endswith('name in (\'port\', \'listen_addresses\');'):
-            self.results = [('max_connections', 42),
-                            ('log_file_mode', '0666'),
-                            ('port', 1984),
-                            ('listen_addresses', '6.6.6.6')]
+        elif sql.startswith('SELECT name, current_setting(name) FROM pg_settings'):
+            self.results = [('config_file', '/config/file/path'),
+                            ('data_directory', '/foo/bar/data'),
+                            ('hba_file', '/hba/file/path'),
+                            ('ident_file', '/ident/file/path'),
+                            ('max_connections', 42),
+                            ('max_locks_per_transaction', 73),
+                            ('max_prepared_transactions', 0),
+                            ('max_replication_slots', 21),
+                            ('max_wal_senders', 37),
+                            ('track_commit_timestamp', 'off'),
+                            ('wal_level', 'replica'),
+                            ('listen_addresses', '6.6.6.6'),
+                            ('port', 1984)]
         elif sql.startswith('SELECT name, setting'):
             self.results = [('wal_segment_size', '2048', '8kB', 'integer', 'internal'),
                             ('wal_block_size', '8192', None, 'integer', 'internal'),
@@ -136,8 +145,6 @@ class MockCursor(object):
             self.results = [(2,)]
         elif sql.startswith('SELECT nodeid, groupid'):
             self.results = [(1, 0, 'host1', 5432, 'primary'), (2, 1, 'host2', 5432, 'primary')]
-        elif sql.endswith('where name = \'data_directory\';'):
-            self.results = [('/foo/bar/data',)]
         elif sql.endswith('WHERE name=\'hba_file\'));'):
             self.results = [('host all all 0.0.0.0/0 md5\n'
                              'host replication replicator 127.0.0.1/32 md5\n'

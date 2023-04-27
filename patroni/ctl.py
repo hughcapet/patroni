@@ -1394,22 +1394,29 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
             conn.close()
             raise PatroniCtlException('The provided user does not have superuser privilege')
 
-        cur.execute("SELECT name, setting \
-                     from pg_settings \
-                     where setting <> reset_val and setting <> '(disabled)' \
-                     or name in ('port', 'listen_addresses');")
+        cur.execute("SELECT name, current_setting(name) FROM pg_settings\
+                     WHERE context <> 'internal' \
+                     AND source IN ('configuration file', 'command line', 'environment variable') \
+                     AND category <> 'Write-Ahead Log / Recovery Target' \
+                     OR name IN ('hba_file', 'ident_file', 'config_file', \
+                                 'data_directory', \
+                                 'listen_addresses', 'port', \
+                                 'max_connections', 'max_worker_processes', 'max_wal_senders', \
+                                 'max_replication_slots', 'max_locks_per_transaction', 'max_prepared_transactions', \
+                                 'hot_standby', \
+                                 'wal_level', 'wal_log_hints', \
+                                 'wal_keep_segments', 'wal_keep_size', \
+                                 'track_commit_timestamp');")
 
         # adjust values
         config['postgresql']['parameters'] = dict()
         for p, v in cur.fetchall():
             if p in config['bootstrap']['dcs']['postgresql']['parameters']:
                 config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
+            elif p == 'data_directory':
+                config['postgresql']['data_dir'] = v
             else:
                 config['postgresql']['parameters'][p] = v
-
-        # gather additional info
-        cur.execute("SELECT setting from pg_settings where name = 'data_directory';")
-        config['postgresql']['data_dir'] = cur.fetchone()[0]
 
     conn.close()
 
