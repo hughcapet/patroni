@@ -185,6 +185,7 @@ def get_major_version(bin_dir: OptionalType[str] = None) -> str:
     :param bin_dir: path to PostgreSQL binaries directory. If ``None`` it will use the first ``postgres`` binary that
         is found by subprocess in the ``PATH``.
     :returns: the PostgreSQL major version.
+    :raises :class:`patroni.exceptions.PatroniException`: if the postgres binary call failed due to OSError
 
     :Example:
 

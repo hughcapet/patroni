@@ -1442,10 +1442,8 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
     port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
 
-    hba_file = config['postgresql']['parameters']['hba_file'] \
-        if 'hba_file' in config['postgresql']['parameters'] else f"{config['postgresql']['data_dir']}/pg_hba.conf"
     try:
-        with open(hba_file, 'r') as f:
+        with open(f"{config['postgresql']['data_dir']}/pg_hba.conf", 'r') as f:
             config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
                                               if i.startswith(('local',
                                                                'host',
@@ -1477,27 +1475,28 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
     - ``scope``: the provided option value
     - ``name``: hostname
     - ``bootsrtap.dcs``: section with all the parameters (incl. PG GUCs that can only be adjusted
-        in the dynamic configuration) set to their default values defined by Patroni.
-    - ``postgresql.parameters``: the non-default source instance's GUCs or an empty dict
-    - ``postgresql.bin_dir``:
-    - ``postgresql.datadir``:
+        in the dynamic configuration) set to their default values defined by Patroni and adjusted by the source
+        instances's configuration if DSN is provided.
+    - ``postgresql.parameters``: the source instance's GUC values or an empty dict
+    - ``postgresql.bin_dir``, ``postgresql.datadir``
     - ``postgresql.listen``: source instance's listen_addresses and port GUC values
-    - ``postgresql.connect_address``: if generated from dsn
+    - ``postgresql.connect_address``: if generated from DSN
     - ``postgresql.authentication``:
         - superuser and replication users defined (if possible, usernames are set from the respective ENV variables,
           otherwise the default 'postgres' and 'replicator' values are used). If DSN was provided, it is used to define
           the superuser name.
         - rewind user defined if no DSN provided, PG version can be defined and PG version is 11+
           (if possible, username is set from the respective ENV var)
-    - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True, if PG version is 11+
+    - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True if PG version is 11+
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
 
-    If DSN is provided, gather all the available non-default GUC values and store them in the appropriate part
+    If DSN is provided, gather all the available non-internal GUC values having configuration file,
+    postmaster command line or environment variable as a source and store them in the appropriate part
     of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
 
     :param scope: Scope parameter value to write into the configuration.
     :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
-    :param dsn: Optional dsn string for the local instance to get non-default GUC values from.
+    :param dsn: Optional dsn string for the local instance to get GUC values from.
     :param bin_dir: Optional path to Postgres binaries. Prefered way to get the PG version.
     """
     from patroni.config import Config
