@@ -111,10 +111,8 @@ class MockCursor(object):
             now = datetime.datetime.now(tzutc)
             self.results = [(now, 0, '', 0, '', False, now, replication_info)]
         elif sql.startswith('SELECT name, current_setting(name) FROM pg_settings'):
-            self.results = [('config_file', '/config/file/path'),
+            self.results = [('hba_file', '/hba/file/path'),
                             ('data_directory', '/foo/bar/data'),
-                            ('hba_file', '/hba/file/path'),
-                            ('ident_file', '/ident/file/path'),
                             ('max_connections', 42),
                             ('max_locks_per_transaction', 73),
                             ('max_prepared_transactions', 0),
@@ -123,7 +121,8 @@ class MockCursor(object):
                             ('track_commit_timestamp', 'off'),
                             ('wal_level', 'replica'),
                             ('listen_addresses', '6.6.6.6'),
-                            ('port', 1984)]
+                            ('port', 1984),
+                            ('archive_command', 'my archive command')]
         elif sql.startswith('SELECT name, setting'):
             self.results = [('wal_segment_size', '2048', '8kB', 'integer', 'internal'),
                             ('wal_block_size', '8192', None, 'integer', 'internal'),

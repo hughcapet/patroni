@@ -1409,14 +1409,17 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
                                  'track_commit_timestamp');")
 
         # adjust values
-        config['postgresql']['parameters'] = dict()
         for p, v in cur.fetchall():
-            if p in config['bootstrap']['dcs']['postgresql']['parameters']:
-                config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
-            elif p == 'data_directory':
+            if p == 'data_directory':
                 config['postgresql']['data_dir'] = v
-            else:
+            elif p in ('archive_command', 'restore_command', 'archive_cleanup_command',
+                       'recovery_end_command', 'ssl_passphrase_command'):
+                # write commands to the local config due to security implications
+                if not config['postgresql']['parameters']:
+                    config['postgresql']['parameters'] = {}
                 config['postgresql']['parameters'][p] = v
+            else:
+                config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
 
     conn.close()
 
