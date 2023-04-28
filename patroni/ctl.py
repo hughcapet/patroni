@@ -1398,6 +1398,7 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
                      WHERE context <> 'internal' \
                      AND source IN ('configuration file', 'command line', 'environment variable') \
                      AND category <> 'Write-Ahead Log / Recovery Target' \
+                     AND setting <> '(disabled)' \
                      OR name IN ('hba_file', 'ident_file', 'config_file', \
                                  'data_directory', \
                                  'listen_addresses', 'port', \
