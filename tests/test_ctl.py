@@ -689,7 +689,7 @@ class TestCtl(unittest.TestCase):
     @patch('builtins.open', MagicMock())
     @patch('socket.gethostname', Mock(return_value='testhost'))
     @patch('os.makedirs')
-    @patch('yaml.dump')
+    @patch('yaml.safe_dump')
     def test_generate_config(self, mock_config_dump, mock_makedir):
         scope = 'sample_config'
         self.maxDiff = None

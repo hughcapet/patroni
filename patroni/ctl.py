@@ -1591,4 +1591,4 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
     if dir_path and not os.path.isdir(dir_path):
         os.makedirs(dir_path)
     with open(file, 'w') as fd:
-        yaml.dump(config, fd, default_flow_style=False)
+        yaml.safe_dump(config, fd, default_flow_style=False)
