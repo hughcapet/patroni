@@ -1543,7 +1543,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
         }
         config['postgresql']['pg_hba'] = [
             'host all all 0.0.0.0/0 md5',
-            f'host replication {replicator} 127.0.0.1/32 md5'
+            f'host replication {replicator} all md5'
         ]
 
     if bin_dir:

@@ -731,7 +731,7 @@ class TestCtl(unittest.TestCase):
             'postgresql': {
                 'connect_address': no_value_msg,
                 'listen': no_value_msg,
-                'pg_hba': ['host all all 0.0.0.0/0 md5', 'host replication replicator 127.0.0.1/32 md5'],
+                'pg_hba': ['host all all 0.0.0.0/0 md5', 'host replication replicator all md5'],
                 'parameters': None,
                 'authentication': {'superuser': {'username': 'postgres', 'password': no_value_msg},
                                    'replication': {'username': 'replicator', 'password': no_value_msg}},
