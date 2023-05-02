@@ -334,7 +334,7 @@ class Config(object):
                 or not is_local and ConfigHandler.CMDLINE_OPTIONS[name][1](value)}
 
     def _safe_copy_dynamic_configuration(self, dynamic_configuration):
-        config = deepcopy(self.get_default_config())
+        config = self.get_default_config()
 
         for name, value in dynamic_configuration.items():
             if name == 'postgresql':
