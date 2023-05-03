@@ -773,10 +773,11 @@ class TestCtl(unittest.TestCase):
         mock_config_dump.reset_mock()
 
         # 3. generate config for a running instance (adjusted values are taken from tests/__init__.py)
+        config['scope'] = 'my_cluster'
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
-        config['bootstrap']['dcs']['postgresql']['parameters']['hba_file'] = '/hba/file/path'
+        config['postgresql']['parameters']['hba_file'] = '/hba/file/path'
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
         config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
         config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21

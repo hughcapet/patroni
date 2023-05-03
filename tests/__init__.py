@@ -122,7 +122,8 @@ class MockCursor(object):
                             ('wal_level', 'replica'),
                             ('listen_addresses', '6.6.6.6'),
                             ('port', 1984),
-                            ('archive_command', 'my archive command')]
+                            ('archive_command', 'my archive command'),
+                            ('cluster_name', 'my_cluster')]
         elif sql.startswith('SELECT name, setting'):
             self.results = [('wal_segment_size', '2048', '8kB', 'integer', 'internal'),
                             ('wal_block_size', '8192', None, 'integer', 'internal'),
