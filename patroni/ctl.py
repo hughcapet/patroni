@@ -1453,7 +1453,7 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
 
     try:
-        with open(f"{config['postgresql']['data_dir']}/pg_hba.conf", 'r') as f:
+        with open(f"{config['postgresql']['parameters']['hba_file']}", 'r') as f:
             config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
                                               if i.startswith(('local',
                                                                'host',
