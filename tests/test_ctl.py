@@ -700,11 +700,7 @@ class TestCtl(unittest.TestCase):
                                           '--dsn', 'host:foo port:bar user:foobar'])
         assert result.exit_code == 1
 
-        # 1.2 No user
-        result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar'])
-        assert result.exit_code == 1
-
-        # 1.3 User is not a superuser
+        # 1.2 User is not a superuser
         with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
             result = self.runner.invoke(ctl, ['generate-config',
                                               '--scope', scope,

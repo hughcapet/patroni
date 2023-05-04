@@ -1376,6 +1376,7 @@ def format_pg_version(version):
 
 
 def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: str, dsn: Optional[str] = None) -> None:
+    from getpass import getuser
     from patroni.postgresql.config import parse_dsn
     from patroni.config import AUTH_ALLOWED_PARAMETERS_MAPPING
 
@@ -1391,9 +1392,8 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
         val = parsed_dsn.get(conn_param, os.getenv(env_var))
         if val:
             su_params[conn_param] = val
-    if 'user' not in su_params:
-        raise PatroniCtlException('Superuser is not provided via DSN or PGUSER environment variable.')
-    su_params['username'] = su_params.pop('user')  # because we use "username" in the config for some reason
+    # because we use "username" in the config for some reason
+    su_params['username'] = su_params.pop('user', getuser())
     su_params['password'] = su_params.get('password') or click.prompt('Please enter the user password',
                                                                       hide_input=True, default="")
 
