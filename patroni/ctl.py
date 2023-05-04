@@ -1375,21 +1375,33 @@ def format_pg_version(version):
         return "{0}.{1}".format(version // 10000, version % 100)
 
 
-def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_value_msg: str) -> None:
+def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: str, dsn: Optional[str] = None) -> None:
     from patroni.postgresql.config import parse_dsn
-    from patroni.config import _AUTH_ALLOWED_PARAMETERS
+    from patroni.config import AUTH_ALLOWED_PARAMETERS_MAPPING
 
-    parsed_dsn = parse_dsn(dsn)
-    if not parsed_dsn:
-        raise PatroniCtlException('Failed to parse DSN string')
-    if not parsed_dsn.get('user'):
-        raise PatroniCtlException('No user provided in the DSN')
+    su_params = parsed_dsn = {}
+
+    if dsn:
+        parsed_dsn = parse_dsn(dsn)
+        if not parsed_dsn:
+            raise PatroniCtlException('Failed to parse DSN string')
+
+    # gather auth parameters for the superuser
+    for conn_param, env_var in AUTH_ALLOWED_PARAMETERS_MAPPING.items():
+        val = parsed_dsn.get(conn_param, os.getenv(env_var))
+        if val:
+            su_params[conn_param] = val
+    if 'user' not in su_params:
+        raise PatroniCtlException('Superuser is not provided via DSN or PGUSER environment variable.')
+    su_params['username'] = su_params.pop('user')  # because we use "username" in the config for some reason
+    su_params['password'] = su_params.get('password') or click.prompt('Please enter the user password',
+                                                                      hide_input=True, default="")
 
     from . import psycopg
-    conn = psycopg.connect(dsn=dsn)
+    conn = psycopg.connect(dsn=dsn, password=su_params['password'])
 
     with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (parsed_dsn['user'],))
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (su_params['username'],))
         if cur.rowcount < 1:
             conn.close()
             raise PatroniCtlException('The provided user does not have superuser privilege')
@@ -1447,7 +1459,9 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
         except psutil.NoSuchProcess:
             raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
 
-    config['postgresql']['connect_address'] = f'{parsed_dsn["host"]}:{parsed_dsn["port"]}'
+    connect_host = parsed_dsn.get('host', os.getenv('PGHOST'))
+    connect_port = parsed_dsn.get('port', os.getenv('PGPORT'))
+    config['postgresql']['connect_address'] = f'{connect_host}:{connect_port}'
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
@@ -1465,25 +1479,27 @@ def enrich_config_from_running_instance(dsn: str, config: Dict[str, Any], no_val
         raise PatroniCtlException(f'Failed to read hba_file: {e}')
 
     config['postgresql']['authentication'] = {
-        'superuser': {k: v for k, v in parsed_dsn.items() if k in _AUTH_ALLOWED_PARAMETERS},
+        'superuser': su_params,
         'replication': {'username': no_value_msg, 'password': no_value_msg}
     }
-    config['postgresql']['authentication']['superuser']['username'] = parsed_dsn['user']
 
 
-@ctl.command('generate-config', help='Generate patroni configuration file. Optionally, for a given running cluster')
-@click.option('--scope', help='Scope parameter value', required=True)
+@ctl.command('generate-config',
+             help='Generate patroni sample configuration file or a configuration file for a running instance')
+@click.option('--scope', help='Scope parameter value')
 @click.option('--file', '-f', help='Full path to the configuration file to be created', default='/tmp/patroni.yml')
-@click.option('--dsn',
-              help='DSN string of the instance to be used as a source of postgres configuration parameter values.\
-                    Superuser connection is required.')
+@click.option('--sample', '-s', help='Create a sample config', is_flag=True)
+@click.option('--dsn', '-d',
+              help='Optional DSN string of the instance to be used as a source \
+                    of postgres configuration parameter values. Superuser connection is required.')
 @click.option('--bin-dir', '-b', help='Full path to the directory with PostgreSQL libraries')
-def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional[str]) -> None:
+def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin_dir: Optional[str]) -> None:
     """Generate Patroni configuration file
 
-    If DSN is provided, gather all the available non-internal GUC values having configuration file,
+    Gather all the available non-internal GUC values having configuration file,
     postmaster command line or environment variable as a source and store them in the appropriate part
     of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
+    Either DSN or PG env vars will be used for the connection.
 
     The created configuration contains:
     - ``scope``: the provided option value. Will be overwritten with the cluster_name GUC value if it is available
@@ -1496,16 +1512,17 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
     - ``postgresql.listen``: source instance's listen_addresses and port GUC values
     - ``postgresql.connect_address``: if generated from DSN
     - ``postgresql.authentication``:
-        - superuser and replication users defined (if possible, usernames are set from the respective ENV variables,
-          otherwise the default 'postgres' and 'replicator' values are used). If DSN was provided, it is used to define
-          the superuser name.
-        - rewind user defined if no DSN provided, PG version can be defined and PG version is 11+
-          (if possible, username is set from the respective ENV var)
+        - superuser and replication users defined (if possible, usernames are set from the respective Patroni ENV vars,
+          otherwise the default 'postgres' and 'replicator' values are used).
+          If not a sample config, either DSN or PG ENV vars are used to define superuser authentication parameters.
+        - rewind user is defined for a sample config if PG version can be defined and PG version is 11+
+          (if possible, username is set from the respective Patroni ENV var)
     - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True if PG version is 11+
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
 
     :param scope: Scope parameter value to write into the configuration.
     :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
+    :param sample: Optional flag. If set, no source instance will be used - generate config with some sane defaults.
     :param dsn: Optional dsn string for the local instance to get GUC values from.
     :param bin_dir: Optional path to Postgres binaries. Prefered way to get PG version.
     """
@@ -1518,7 +1535,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
     config = {
-        'scope': scope,
+        'scope': scope or no_value_msg,
         'name': socket.gethostname(),
         'bootstrap': {
             'dcs': dynamic_config
@@ -1533,24 +1550,24 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
     if bin_dir:
         config['postgresql']['bin_dir'] = bin_dir
 
-    if dsn:
-        enrich_config_from_running_instance(dsn, config, no_value_msg)
-    else:  # no source instance
+    if sample:
         replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
         config['postgresql']['authentication'] = {
             'superuser': {
                 'username': os.getenv('PATRONI_SUPERUSER_USERNAME', 'postgres'),
-                'password': no_value_msg
+                'password': os.getenv('PATRONI_SUPERUSER_PASSWORD', no_value_msg)
             },
             'replication': {
                 'username': replicator,
-                'password': no_value_msg
+                'password': os.getenv('PATRONI_REPLICATION_PASSWORD', no_value_msg)
             }
         }
         config['postgresql']['pg_hba'] = [
             'host all all 0.0.0.0/0 md5',
             f'host replication {replicator} all md5'
         ]
+    else:
+        enrich_config_from_running_instance(config, no_value_msg, dsn)
 
     if bin_dir:
         # obtain version from the binary
@@ -1558,7 +1575,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
             pg_version = postgres_major_version_to_int(get_major_version(bin_dir))
         except PatroniException as e:
             raise PatroniCtlException(str(e))
-    elif dsn:
+    elif not sample:
         # obtain PostgreSQL version of the running instance if bin_dir is not provided
         try:
             with open(f"{config['postgresql']['data_dir']}/PG_VERSION") as f:
@@ -1576,7 +1593,7 @@ def generate_config(scope: str, file: str, dsn: Optional[str], bin_dir: Optional
             wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
             config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
                 ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
-        if not dsn and pg_version >= 110000:
+        if sample and pg_version >= 110000:
             config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
             config['postgresql']['authentication']['rewind'] = {
                 'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),

@@ -32,6 +32,20 @@ _AUTH_ALLOWED_PARAMETERS = (
     'channel_binding'
 )
 
+AUTH_ALLOWED_PARAMETERS_MAPPING = {
+    'user': 'PGUSER',
+    'password': 'PGPASSWORD',
+    'sslmode': 'PGSSLMODE',
+    'sslcert': 'PGSSLCERT',
+    'sslkey': 'PGSSLKEY',
+    'sslpassword': '',
+    'sslrootcert': 'PGSSLROOTCERT',
+    'sslcrl': 'PGSSLCRL',
+    'sslcrldir': 'PGSSLCRLDIR',
+    'gssencmode': 'PGGSSENCMODE',
+    'channel_binding': 'PGCHANNELBINDING'
+}
+
 
 def default_validator(conf):
     if not conf:

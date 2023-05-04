@@ -704,11 +704,7 @@ class TestCtl(unittest.TestCase):
         result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar'])
         assert result.exit_code == 1
 
-        # 1.3 No scope
-        result = self.runner.invoke(ctl, ['generate-config', '--dsn', 'host=foo port=bar user=foobar'])
-        assert result.exit_code == 2
-
-        # 1.4 User is not a superuser
+        # 1.3 User is not a superuser
         with patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True):
             result = self.runner.invoke(ctl, ['generate-config',
                                               '--scope', scope,
@@ -741,7 +737,7 @@ class TestCtl(unittest.TestCase):
 
         # 2. Sample config without target instance
         # 2.1 With a dir creation
-        self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--file', '/foo/bar.yml'])
+        self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--file', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -754,7 +750,7 @@ class TestCtl(unittest.TestCase):
         # 2.2.1 pg_version < 13
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
         with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--bin-dir', '/foo/bar'])
+            self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--bin-dir', '/foo/bar'])
             mock_makedir.assert_not_called()
             self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -767,7 +763,7 @@ class TestCtl(unittest.TestCase):
         config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
         config['postgresql']['authentication']['rewind'] = {'username': 'rewind_user', 'password': no_value_msg}
         with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
-            self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--bin-dir', '/foo/bar'])
+            self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--bin-dir', '/foo/bar'])
             self.assertEqual(config, mock_config_dump.call_args[0][0])
 
         mock_config_dump.reset_mock()
@@ -787,6 +783,7 @@ class TestCtl(unittest.TestCase):
         config['postgresql']['data_dir'] = '/foo/bar/data'
         config['postgresql']['authentication']['superuser'] = {
             'username': 'foobar',
+            'password': '',
             'channel_binding': 'prefer',
             'gssencmode': 'prefer',
             'sslmode': 'prefer'
