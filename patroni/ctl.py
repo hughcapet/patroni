@@ -1387,7 +1387,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
         if not parsed_dsn:
             raise PatroniCtlException('Failed to parse DSN string')
 
-    # gather auth parameters for the superuser
+    # gather auth parameters for the superuser config
     for conn_param, env_var in AUTH_ALLOWED_PARAMETERS_MAPPING.items():
         val = parsed_dsn.get(conn_param, os.getenv(env_var))
         if val:
@@ -1398,7 +1398,10 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                                                                       hide_input=True, default="")
 
     from . import psycopg
-    conn = psycopg.connect(dsn=dsn, password=su_params['password'])
+    try:
+        conn = psycopg.connect(dsn=dsn, password=su_params['password'])
+    except psycopg.Error as e:
+        raise PatroniCtlException(f'Failed to establish PostgreSQL connection: {e}')
 
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (su_params['username'],))
@@ -1442,28 +1445,27 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     if cluster_name:
         config['scope'] = cluster_name
 
-    if not config['postgresql']['bin_dir']:
-        # obtain bin_dir of the running instance
-        postmaster_pid = None
-        try:
-            with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
-                postmaster_pid = f.readline()
-                if not postmaster_pid:
-                    raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
-                postmaster_pid = int(postmaster_pid.strip())
-        except OSError as e:
-            raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
-        try:
-            import psutil
-            config['postgresql']['bin_dir'] = psutil.Process(postmaster_pid).exe()
-        except psutil.NoSuchProcess:
-            raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
+    # obtain bin_dir of the running instance
+    postmaster_pid = None
+    try:
+        with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
+            postmaster_pid = f.readline()
+            if not postmaster_pid:
+                raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
+            postmaster_pid = int(postmaster_pid.strip())
+    except OSError as e:
+        raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
+    try:
+        import psutil
+        config['postgresql']['bin_dir'] = os.path.dirname(psutil.Process(postmaster_pid).exe())
+    except psutil.NoSuchProcess:
+        raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
 
-    connect_host = parsed_dsn.get('host', os.getenv('PGHOST'))
-    connect_port = parsed_dsn.get('port', os.getenv('PGPORT'))
+    port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
+    connect_host = parsed_dsn.get('host', os.getenv('PGHOST', 'localhost'))
+    connect_port = parsed_dsn.get('port', os.getenv('PGPORT', port))
     config['postgresql']['connect_address'] = f'{connect_host}:{connect_port}'
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
-    port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
 
     try:
@@ -1544,13 +1546,13 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
             'parameters': None,
             'connect_address': no_value_msg,
             'listen': no_value_msg,
-            'bin_dir': ''
         },
     }
-    if bin_dir:
+    # for a running instance bin_dir will be gathered from the postmaster process
+    if sample and bin_dir:
         config['postgresql']['bin_dir'] = bin_dir
 
-    if sample:
+    if sample:  # some sane defaults or values set via Patroni env vars
         replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
         config['postgresql']['authentication'] = {
             'superuser': {
@@ -1566,28 +1568,17 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
             'host all all 0.0.0.0/0 md5',
             f'host replication {replicator} all md5'
         ]
-    else:
+    else:  # or real values
         enrich_config_from_running_instance(config, no_value_msg, dsn)
 
-    if bin_dir:
+    if 'bin_dir' in config['postgresql']:
         # obtain version from the binary
         try:
-            pg_version = postgres_major_version_to_int(get_major_version(bin_dir))
+            pg_version = postgres_major_version_to_int(get_major_version(config['postgresql']['bin_dir'] or None))
         except PatroniException as e:
             raise PatroniCtlException(str(e))
-    elif not sample:
-        # obtain PostgreSQL version of the running instance if bin_dir is not provided
-        try:
-            with open(f"{config['postgresql']['data_dir']}/PG_VERSION") as f:
-                pg_version = f.readline()
-                if not pg_version:
-                    raise PatroniCtlException('Failed to obtain PostgreSQL version from the PG_VERSION file')
-                pg_version = postgres_major_version_to_int(pg_version.strip())
-        except OSError as e:
-            raise PatroniCtlException(f'Error reading PG_VERSION file: {e}')
 
-    # add version-specific configuration
-    if pg_version:
+        # add version-specific configuration
         if dynamic_config['postgresql']['parameters'].keys().isdisjoint({'wal_keep_size', 'wal_keep_segments'}):
             from patroni.postgresql.config import ConfigHandler
             wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
@@ -1599,6 +1590,8 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
                 'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
                 'password': no_value_msg
             }
+    else:
+        config['postgresql']['bin_dir'] = ''
 
     # redundant values from the default config
     del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']

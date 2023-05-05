@@ -145,10 +145,6 @@ class MockCursor(object):
             self.results = [(2,)]
         elif sql.startswith('SELECT nodeid, groupid'):
             self.results = [(1, 0, 'host1', 5432, 'primary'), (2, 1, 'host2', 5432, 'primary')]
-        elif sql.endswith('WHERE name=\'hba_file\'));'):
-            self.results = [('host all all 0.0.0.0/0 md5\n'
-                             'host replication replicator 127.0.0.1/32 md5\n'
-                             '# foobar',)]
         elif sql.startswith('SELECT 1'):
             self.results = [(1,)]
             self.rowcount = 1

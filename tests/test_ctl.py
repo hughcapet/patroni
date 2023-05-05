@@ -731,9 +731,9 @@ class TestCtl(unittest.TestCase):
             }
         }
 
-        # 2. Sample config without target instance
+        # 2. Sample config
         # 2.1 With a dir creation
-        self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--file', '/foo/bar.yml'])
+        result = self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--file', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -742,6 +742,8 @@ class TestCtl(unittest.TestCase):
 
         # 2.2 With bin_dir provided
         config['postgresql']['bin_dir'] = '/foo/bar'
+
+        # Version-specific params
 
         # 2.2.1 pg_version < 13
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
@@ -764,7 +766,7 @@ class TestCtl(unittest.TestCase):
 
         mock_config_dump.reset_mock()
 
-        # 3. generate config for a running instance (adjusted values are taken from tests/__init__.py)
+        # 3. Config for a running instance (adjusted values are taken from tests/__init__.py)
         config['scope'] = 'my_cluster'
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
@@ -791,79 +793,64 @@ class TestCtl(unittest.TestCase):
 
         hba_mock = mock_open(read_data='\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5']))
 
-        # 3.1 bin_dir provided
-        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
-        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
-
-        with patch('builtins.open', Mock(return_value=hba_mock())):
-            # 3.1.1 pg_version < 13
-            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
-                self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar',
-                                         '--bin-dir', '/foo/bar'])
-                self.assertEqual(config, mock_config_dump.call_args[0][0])
-
-            mock_config_dump.reset_mock()
-
-            # 3.1.2 Error while calling postgres --version
-            with patch('subprocess.check_output', Mock(side_effect=OSError)):
-                result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
-                                                  'host=foo port=bar user=foobar', '--bin-dir', '/foo/bar'])
-                assert result.exit_code == 1
-
-        # 3.2 no bin_dir provided
-
+        # 3.1 bin_dir extracted from the running process
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
-             patch('psutil.Process.exe', Mock(return_value='/foo/bar')):
+             patch('psutil.Process.exe', Mock(return_value='/foo/bar/postgres')):
 
-            # 3.2.1 pg_version > 13
-            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
-            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-
-            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+            # 3.1.1 explicitly provided bin_dir is different from the one extracted from the pid
+            # + PG version < 13
+            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
+            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")), \
+                 patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           hba_mock(),
-                                                          mock_open(read_data='13.4')(),
                                                           mock_open()()])):
-                self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
+                                         'host=foo port=bar user=foobar',
+                                         '--bin-dir', '/bar/foo'])
                 self.assertEqual(config, mock_config_dump.call_args[0][0])
 
                 mock_config_dump.reset_mock()
 
-            # 3.2.2 empty PG_VERSION file
-            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+            # 3.1.2 pg_version >= 13
+            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")), \
+                 patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           hba_mock(),
-                                                          mock_open(read_data='')()])):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-                assert result.exit_code == 1
+                                                          mock_open()()])):
+                self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
+                                         'host=foo port=bar user=foobar'])
+                self.assertEqual(config, mock_config_dump.call_args[0][0])
 
-            # 3.2.3 failed to open PG_VERSION file
-            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
-                                                          hba_mock(),
-                                                          OSError])):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-                assert result.exit_code == 1
+                mock_config_dump.reset_mock()
 
-            # 3.2.4 empty postmaster.pid
+            # 3.2 empty postmaster.pid
             with patch('builtins.open', Mock(return_value=mock_open(read_data='')())):
                 result = self.runner.invoke(ctl, ['generate-config',
                                                   '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
                 assert result.exit_code == 1
 
-            # 3.2.5 Failed to open postmaster.pid
+            # 3.3 Failed to open postmaster.pid
             with patch('builtins.open', Mock(side_effect=OSError)):
                 result = self.runner.invoke(ctl, ['generate-config',
                                                   '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
                 assert result.exit_code == 1
 
-            # 3.2.6 Failed to open pg_hba
+            # 3.4 Error while calling postgres --version
+            with patch('subprocess.check_output', Mock(side_effect=OSError)):
+                result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
+                                                  'host=foo port=bar user=foobar', '--bin-dir', '/foo/bar'])
+                assert result.exit_code == 1
+
+            # 3.5 Failed to open pg_hba
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           OSError])):
                 result = self.runner.invoke(ctl, ['generate-config',
                                                   '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
                 assert result.exit_code == 1
 
-        # 3.2.7 Invalid postmaster pid
+        # 3.6 Invalid postmaster pid
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
              patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
             result = self.runner.invoke(ctl, ['generate-config',
