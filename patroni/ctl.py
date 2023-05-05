@@ -1602,7 +1602,8 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
     # no value instead of 'none' in the parsed yaml
     yaml.add_representer(
         type(None),
-        lambda dumper, _: dumper.represent_scalar(u'tag:yaml.org,2002:null', '')
+        lambda dumper, _: dumper.represent_scalar(u'tag:yaml.org,2002:null', ''),
+        Dumper=yaml.SafeDumper
     )
     dir_path = os.path.dirname(file)
     if dir_path and not os.path.isdir(dir_path):
