@@ -781,7 +781,7 @@ class TestCtl(unittest.TestCase):
         config['postgresql']['data_dir'] = '/foo/bar/data'
         config['postgresql']['authentication']['superuser'] = {
             'username': 'foobar',
-            'password': '',
+            'password': 'qwerty',
             'channel_binding': 'prefer',
             'gssencmode': 'prefer',
             'sslmode': 'prefer'
@@ -791,22 +791,25 @@ class TestCtl(unittest.TestCase):
         del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
         del config['postgresql']['authentication']['rewind']
 
-        hba_mock = mock_open(read_data='\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5']))
+        hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
 
         # 3.1 bin_dir extracted from the running process
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
-             patch('psutil.Process.exe', Mock(return_value='/foo/bar/postgres')):
+             patch('psutil.Process.exe', Mock(return_value='/foo/bar/postgres')),\
+             patch('builtins.open', Mock(side_effect=[
+                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
+                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
+                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
+                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
+                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()()])):
 
             # 3.1.1 explicitly provided bin_dir is different from the one extracted from the pid
             # + PG version < 13
             del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
             config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
-            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")), \
-                 patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
-                                                          hba_mock(),
-                                                          mock_open()()])):
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
                 self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
-                                         'host=foo port=bar user=foobar',
+                                         'host=foo port=bar user=foobar password=qwerty',
                                          '--bin-dir', '/bar/foo'])
                 self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -815,46 +818,80 @@ class TestCtl(unittest.TestCase):
             # 3.1.2 pg_version >= 13
             del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
             config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")), \
-                 patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
-                                                          hba_mock(),
-                                                          mock_open()()])):
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
                 self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
-                                         'host=foo port=bar user=foobar'])
+                                         'host=foo port=bar user=foobar password=qwerty'])
                 self.assertEqual(config, mock_config_dump.call_args[0][0])
 
                 mock_config_dump.reset_mock()
 
+            # 3.1.3 su auth params and connect host from env
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
+                os.environ['PGUSER'] = config['postgresql']['authentication']['superuser']['username'] = 'env_user'
+                os.environ['PGPASSWORD'] = config['postgresql']['authentication']['superuser']['password'] = 'env_pwd'
+                os.environ['PGCHANNELBINDING'] = \
+                    config['postgresql']['authentication']['superuser']['channel_binding'] = 'disable'
+                del config['postgresql']['authentication']['superuser']['gssencmode']
+                del config['postgresql']['authentication']['superuser']['sslmode']
+                os.environ['PGHOST'] = 'env_host'
+                config['postgresql']['connect_address'] = f"{os.environ['PGHOST']}:1984"
+
+                self.runner.invoke(ctl, ['generate-config', '--scope', scope])
+                self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+                mock_config_dump.reset_mock()
+
+            with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
+                # 3.1.4 su password from prompt
+                os.environ.pop('PGPASSWORD')
+                config['postgresql']['authentication']['superuser']['password'] = 'prompt_pwd'
+                self.runner.invoke(ctl, ['generate-config', '--scope', scope],
+                                   input=f"{config['postgresql']['authentication']['superuser']['password']}\n")
+                self.assertEqual(config, mock_config_dump.call_args[0][0])
+
+                mock_config_dump.reset_mock()
+
+            # 3.1.5 Error while calling postgres --version
+            with patch('subprocess.check_output', Mock(side_effect=OSError)):
+                result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
+                                                  'host=foo port=bar user=foobar password=qwerty',
+                                                  '--bin-dir', '/foo/bar'])
+                assert result.exit_code == 1
+
             # 3.2 empty postmaster.pid
             with patch('builtins.open', Mock(return_value=mock_open(read_data='')())):
                 result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                                                  '--scope', scope,
+                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
                 assert result.exit_code == 1
 
             # 3.3 Failed to open postmaster.pid
             with patch('builtins.open', Mock(side_effect=OSError)):
                 result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
-                assert result.exit_code == 1
-
-            # 3.4 Error while calling postgres --version
-            with patch('subprocess.check_output', Mock(side_effect=OSError)):
-                result = self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
-                                                  'host=foo port=bar user=foobar', '--bin-dir', '/foo/bar'])
+                                                  '--scope', scope,
+                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
                 assert result.exit_code == 1
 
             # 3.5 Failed to open pg_hba
             with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
                                                           OSError])):
                 result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                                                  '--scope', scope,
+                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
                 assert result.exit_code == 1
 
         # 3.6 Invalid postmaster pid
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
              patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
             result = self.runner.invoke(ctl, ['generate-config',
-                                              '--scope', scope, '--dsn', 'host=foo port=bar user=foobar'])
+                                              '--scope', scope,
+                                              '--dsn', 'host=foo port=bar user=foobar, password=qwerty'])
+            assert result.exit_code == 1
+
+        # 3.7 Failed PG connecttion
+        from . import psycopg
+        with patch('patroni.psycopg.connect', side_effect=psycopg.Error):
+            result = self.runner.invoke(ctl, ['generate-config', '--scope', scope])
             assert result.exit_code == 1
 
 
