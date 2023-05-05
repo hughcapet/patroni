@@ -1409,7 +1409,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
             conn.close()
             raise PatroniCtlException('The provided user does not have superuser privilege')
 
-        cur.execute("SELECT name, current_setting(name) FROM pg_settings\
+        cur.execute("SELECT name, current_setting(name) FROM pg_settings \
                      WHERE context <> 'internal' \
                      AND source IN ('configuration file', 'command line', 'environment variable') \
                      AND category <> 'Write-Ahead Log / Recovery Target' \
@@ -1441,9 +1441,8 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
 
     conn.close()
 
-    cluster_name = config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
-    if cluster_name:
-        config['scope'] = cluster_name
+    if config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']:
+        config['scope'] = config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
 
     # obtain bin_dir of the running instance
     postmaster_pid = None
@@ -1479,6 +1478,12 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                                                                'hostnogssenc'))]
     except OSError as e:
         raise PatroniCtlException(f'Failed to read hba_file: {e}')
+
+    try:
+        with open(f"{config['postgresql']['parameters']['ident_file']}", 'r') as f:
+            config['postgresql']['pg_ident'] = [i.strip() for i in f.readlines() if i.strip() and not i.startswith('#')]
+    except OSError as e:
+        raise PatroniCtlException(f'Failed to read ident_file: {e}')
 
     config['postgresql']['authentication'] = {
         'superuser': su_params,

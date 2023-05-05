@@ -772,6 +772,8 @@ class TestCtl(unittest.TestCase):
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
         config['postgresql']['parameters']['hba_file'] = '/hba/file/path'
+        config['postgresql']['parameters']['ident_file'] = '/ident/file/path'
+        config['postgresql']['pg_ident'] = ['foo bar foobar', 'foobar bar foo']
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
         config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
         config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
@@ -792,16 +794,20 @@ class TestCtl(unittest.TestCase):
         del config['postgresql']['authentication']['rewind']
 
         hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
+        ident_content = '\n'.join(config['postgresql']['pg_ident'] + ['# something very interesting', '  '])
+        open_res = []
+        for _ in range(5):
+            open_res.extend([
+                mock_open(read_data='1984')(),
+                mock_open(read_data=hba_content)(),
+                mock_open(read_data=ident_content)(),
+                mock_open()()
+            ])
 
         # 3.1 bin_dir extracted from the running process
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
              patch('psutil.Process.exe', Mock(return_value='/foo/bar/postgres')),\
-             patch('builtins.open', Mock(side_effect=[
-                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
-                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
-                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
-                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()(),
-                 mock_open(read_data='1984')(), mock_open(read_data=hba_content)(), mock_open()()])):
+             patch('builtins.open', Mock(side_effect=open_res)):
 
             # 3.1.1 explicitly provided bin_dir is different from the one extracted from the pid
             # + PG version < 13
@@ -880,7 +886,16 @@ class TestCtl(unittest.TestCase):
                                                   '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
                 assert result.exit_code == 1
 
-        # 3.6 Invalid postmaster pid
+            # 3.6 Failed to open pg_ident
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
+                                                          mock_open(read_data=hba_content)(),
+                                                          OSError])):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope,
+                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
+                assert result.exit_code == 1
+
+        # 3.7 Invalid postmaster pid
         with patch('psutil.Process.__init__', Mock(return_value=None)),\
              patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
             result = self.runner.invoke(ctl, ['generate-config',

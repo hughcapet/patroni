@@ -112,6 +112,7 @@ class MockCursor(object):
             self.results = [(now, 0, '', 0, '', False, now, replication_info)]
         elif sql.startswith('SELECT name, current_setting(name) FROM pg_settings'):
             self.results = [('hba_file', '/hba/file/path'),
+                            ('ident_file', '/ident/file/path'),
                             ('data_directory', '/foo/bar/data'),
                             ('max_connections', 42),
                             ('max_locks_per_transaction', 73),
