@@ -1428,11 +1428,13 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
         for p, v in cur.fetchall():
             if p == 'data_directory':
                 config['postgresql']['data_dir'] = v
+            elif p == 'cluster_name':
+                config['scope'] = v
             elif p in ('archive_command', 'restore_command', 'archive_cleanup_command',
                        'recovery_end_command', 'ssl_passphrase_command',
                        'hba_file', 'ident_file', 'config_file'):
                 # write commands to the local config due to security implications
-                # write hba/ident/config_file to local config to ensure they are not removed
+                # write hba/ident/config_file to local config to ensure they are not removed later
                 if not config['postgresql']['parameters']:
                     config['postgresql']['parameters'] = {}
                 config['postgresql']['parameters'][p] = v
@@ -1440,9 +1442,6 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                 config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
 
     conn.close()
-
-    if config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']:
-        config['scope'] = config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
 
     # obtain bin_dir of the running instance
     postmaster_pid = None
@@ -1503,21 +1502,22 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
 def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin_dir: Optional[str]) -> None:
     """Generate Patroni configuration file
 
-    Gather all the available non-internal GUC values having configuration file,
-    postmaster command line or environment variable as a source and store them in the appropriate part
-    of Patroni configuration (``postgresql.parameters`` or ``bootsrtap.dcs.postgresql.parameters``).
-    Either DSN or PG env vars will be used for the connection.
+    Gather all the available non-internal GUC values having configuration file, postmaster command line or environment
+    variable as a source and store them in the appropriate part of Patroni configuration (``postgresql.parameters`` or
+    ``bootsrtap.dcs.postgresql.parameters``). Either the provided DSN or PG env vars will be used for the connection.
 
     The created configuration contains:
     - ``scope``: the provided option value. Will be overwritten with the cluster_name GUC value if it is available
     - ``name``: hostname
-    - ``bootsrtap.dcs``: section with all the parameters (incl. PG GUCs that can only be adjusted
-        in the dynamic configuration) set to their default values defined by Patroni and adjusted by the source
-        instances's configuration if DSN is provided.
-    - ``postgresql.parameters``: the source instance's GUC values or an empty dict
-    - ``postgresql.bin_dir``, ``postgresql.datadir``
+    - ``bootsrtap.dcs``: section with all the parameters (incl. the majority of PG GUCs) set to their default values
+      defined by Patroni and adjusted by the source instances's configuration values.
+    - ``postgresql.parameters``: the source instance's archive_command, restore_command, archive_cleanup_command,
+      recovery_end_command, ssl_passphrase_command, hba_file, ident_file, config_file GUC values
+    - ``postgresql.bin_dir``: path to Postgres binaries gathered from the running instance or, if not available,
+      the value of the --bin-dir option if provided. Otherwise, an empty string.
+    - ``postgresql.datadir``: the value gathered from the corresponding PG GUC
     - ``postgresql.listen``: source instance's listen_addresses and port GUC values
-    - ``postgresql.connect_address``: if generated from DSN
+    - ``postgresql.connect_address``: if possible, generated from the connection params
     - ``postgresql.authentication``:
         - superuser and replication users defined (if possible, usernames are set from the respective Patroni ENV vars,
           otherwise the default 'postgres' and 'replicator' values are used).
@@ -1526,12 +1526,13 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
           (if possible, username is set from the respective Patroni ENV var)
     - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True if PG version is 11+
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
+    - ``postgresql.pg_ident`` the lines gathered from the source instance's ident_file
 
     :param scope: Scope parameter value to write into the configuration.
     :param file: Full path to the configuration file to be created (/tmp/patroni.yml by default).
     :param sample: Optional flag. If set, no source instance will be used - generate config with some sane defaults.
-    :param dsn: Optional dsn string for the local instance to get GUC values from.
-    :param bin_dir: Optional path to Postgres binaries. Prefered way to get PG version.
+    :param dsn: Optional DSN string for the local instance to get GUC values from.
+    :param bin_dir: Optional path to Postgres binaries.
     """
     from patroni.config import Config
     from patroni.validator import get_major_version
