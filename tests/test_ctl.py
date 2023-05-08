@@ -723,7 +723,7 @@ class TestCtl(unittest.TestCase):
             'postgresql': {
                 'connect_address': no_value_msg,
                 'listen': no_value_msg,
-                'pg_hba': ['host all all 0.0.0.0/0 md5', 'host replication replicator all md5'],
+                'pg_hba': ['host all all all md5', 'host replication replicator all md5'],
                 'parameters': None,
                 'authentication': {'superuser': {'username': 'postgres', 'password': no_value_msg},
                                    'replication': {'username': 'replicator', 'password': no_value_msg}},
@@ -733,7 +733,7 @@ class TestCtl(unittest.TestCase):
 
         # 2. Sample config
         # 2.1 With a dir creation
-        result = self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--file', '/foo/bar.yml'])
+        self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--file', '/foo/bar.yml'])
         mock_makedir.assert_called_once()
         self.assertEqual(config, mock_config_dump.call_args[0][0])
 
@@ -760,6 +760,8 @@ class TestCtl(unittest.TestCase):
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
         config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
         config['postgresql']['authentication']['rewind'] = {'username': 'rewind_user', 'password': no_value_msg}
+        config['postgresql']['pg_hba'] = ['host all all all scram-sha-256',
+                                          'host replication replicator all scram-sha-256']
         with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
             self.runner.invoke(ctl, ['generate-config', '-s', '--scope', scope, '--bin-dir', '/foo/bar'])
             self.assertEqual(config, mock_config_dump.call_args[0][0])
@@ -792,15 +794,16 @@ class TestCtl(unittest.TestCase):
         config['postgresql']['authentication']['replication'] = {'username': no_value_msg, 'password': no_value_msg}
         del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
         del config['postgresql']['authentication']['rewind']
+        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
 
         hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
         ident_content = '\n'.join(config['postgresql']['pg_ident'] + ['# something very interesting', '  '])
         open_res = []
         for _ in range(5):
             open_res.extend([
-                mock_open(read_data='1984')(),
                 mock_open(read_data=hba_content)(),
                 mock_open(read_data=ident_content)(),
+                mock_open(read_data='1984')(),
                 mock_open()()
             ])
 
@@ -811,8 +814,6 @@ class TestCtl(unittest.TestCase):
 
             # 3.1.1 explicitly provided bin_dir is different from the one extracted from the pid
             # + PG version < 13
-            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
-            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments'] = 8
             with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")):
                 self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
                                          'host=foo port=bar user=foobar password=qwerty',
@@ -822,8 +823,6 @@ class TestCtl(unittest.TestCase):
                 mock_config_dump.reset_mock()
 
             # 3.1.2 pg_version >= 13
-            del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
-            config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
             with patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")):
                 self.runner.invoke(ctl, ['generate-config', '--scope', scope, '--dsn',
                                          'host=foo port=bar user=foobar password=qwerty'])
@@ -864,48 +863,55 @@ class TestCtl(unittest.TestCase):
                                                   '--bin-dir', '/foo/bar'])
                 assert result.exit_code == 1
 
-            # 3.2 empty postmaster.pid
-            with patch('builtins.open', Mock(return_value=mock_open(read_data='')())):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope,
-                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
-                assert result.exit_code == 1
-
-            # 3.3 Failed to open postmaster.pid
-            with patch('builtins.open', Mock(side_effect=OSError)):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope,
-                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
-                assert result.exit_code == 1
-
-            # 3.5 Failed to open pg_hba
-            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
-                                                          OSError])):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope,
-                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
-                assert result.exit_code == 1
-
-            # 3.6 Failed to open pg_ident
-            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='1984')(),
-                                                          mock_open(read_data=hba_content)(),
-                                                          OSError])):
-                result = self.runner.invoke(ctl, ['generate-config',
-                                                  '--scope', scope,
-                                                  '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
-                assert result.exit_code == 1
-
-        # 3.7 Invalid postmaster pid
-        with patch('psutil.Process.__init__', Mock(return_value=None)),\
-             patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
+        with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(),
+                                                      mock_open(read_data=ident_content)(),
+                                                      mock_open(read_data='')(),  # 3.2 empty postmaster.pid
+                                                      mock_open(read_data=hba_content)(),
+                                                      mock_open(read_data=ident_content)(),
+                                                      OSError,  # 3.3 Failed to open postmaster.pid
+                                                      mock_open(read_data=hba_content)(),
+                                                      mock_open(read_data=ident_content)(),
+                                                      mock_open(read_data='1984')()  # 3.4 Invalid postmaster pid
+                                                      ])):
             result = self.runner.invoke(ctl, ['generate-config',
                                               '--scope', scope,
-                                              '--dsn', 'host=foo port=bar user=foobar, password=qwerty'])
+                                              '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
+            assert result.exit_code == 1
+
+            result = self.runner.invoke(ctl, ['generate-config',
+                                              '--scope', scope,
+                                              '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
+            assert result.exit_code == 1
+
+            with patch('psutil.Process.__init__', Mock(return_value=None)),\
+                 patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))):
+                result = self.runner.invoke(ctl, ['generate-config',
+                                                  '--scope', scope,
+                                                  '--dsn', 'host=foo port=bar user=foobar, password=qwerty'])
+                assert result.exit_code == 1
+
+        # 3.5 Failed to open pg_hba
+        with patch('builtins.open', Mock(side_effect=OSError)):
+            result = self.runner.invoke(ctl, ['generate-config',
+                                              '--scope', scope,
+                                              '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
+            assert result.exit_code == 1
+
+        # 3.6 Failed to open pg_ident
+        with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(), OSError])):
+            result = self.runner.invoke(ctl, ['generate-config',
+                                              '--scope', scope,
+                                              '--dsn', 'host=foo port=bar user=foobar password=qwerty'])
             assert result.exit_code == 1
 
         # 3.7 Failed PG connecttion
         from . import psycopg
         with patch('patroni.psycopg.connect', side_effect=psycopg.Error):
+            result = self.runner.invoke(ctl, ['generate-config', '--scope', scope])
+            assert result.exit_code == 1
+
+        # 3.8 Failed to get local IP
+        with patch('socket.socket.connect', Mock(side_effect=OSError)):
             result = self.runner.invoke(ctl, ['generate-config', '--scope', scope])
             assert result.exit_code == 1
 

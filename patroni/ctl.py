@@ -1375,12 +1375,52 @@ def format_pg_version(version):
         return "{0}.{1}".format(version // 10000, version % 100)
 
 
+def get_bin_dir_from_running_instance(data_dir: str) -> str:
+    postmaster_pid = None
+    try:
+        with open(f"{data_dir}/postmaster.pid", 'r') as f:
+            postmaster_pid = f.readline()
+            if not postmaster_pid:
+                raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
+            postmaster_pid = int(postmaster_pid.strip())
+    except OSError as e:
+        raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
+    try:
+        import psutil
+        return os.path.dirname(psutil.Process(postmaster_pid).exe())
+    except psutil.NoSuchProcess:
+        raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
+
+
 def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: str, dsn: Optional[str] = None) -> None:
+    """Get
+    - non-internal GUC values having configuration file, postmaster command line or environment variable as a source
+    - postgresql.connect_address, postgresql.listen,
+    - postgresql.pg_hba and postgresql.pg_ident
+    - superuser auth parameters (from the options used for connection)
+    And redefine scope with the clister_name GUC value if set
+
+    :param config: configuration parameters dict to be enriched
+    :param no_value_msg: str value to be used when a parameter value is not available
+    :param dsn: optional DSN string for the source running instance
+    """
     from getpass import getuser
     from patroni.postgresql.config import parse_dsn
     from patroni.config import AUTH_ALLOWED_PARAMETERS_MAPPING
 
-    su_params = parsed_dsn = {}
+    def get_local_ip() -> str:
+        patroni_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            patroni_socket.connect(('8.8.8.8', 80))
+            ip = patroni_socket.getsockname()[0]
+        except OSError as e:
+            raise PatroniCtlException(f'Failed to define local ip: {e}')
+        finally:
+            patroni_socket.close()
+        return ip
+
+    su_params = {}
+    parsed_dsn = {}
 
     if dsn:
         parsed_dsn = parse_dsn(dsn)
@@ -1406,7 +1446,6 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (su_params['username'],))
         if cur.rowcount < 1:
-            conn.close()
             raise PatroniCtlException('The provided user does not have superuser privilege')
 
         cur.execute("SELECT name, current_setting(name) FROM pg_settings \
@@ -1443,24 +1482,8 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
 
     conn.close()
 
-    # obtain bin_dir of the running instance
-    postmaster_pid = None
-    try:
-        with open(f"{config['postgresql']['data_dir']}/postmaster.pid", 'r') as f:
-            postmaster_pid = f.readline()
-            if not postmaster_pid:
-                raise PatroniCtlException('Failed to obtain postmaster pid from postmaster.pid file')
-            postmaster_pid = int(postmaster_pid.strip())
-    except OSError as e:
-        raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
-    try:
-        import psutil
-        config['postgresql']['bin_dir'] = os.path.dirname(psutil.Process(postmaster_pid).exe())
-    except psutil.NoSuchProcess:
-        raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
-
     port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
-    connect_host = parsed_dsn.get('host', os.getenv('PGHOST', 'localhost'))
+    connect_host = parsed_dsn.get('host', os.getenv('PGHOST', get_local_ip()))
     connect_port = parsed_dsn.get('port', os.getenv('PGPORT', port))
     config['postgresql']['connect_address'] = f'{connect_host}:{connect_port}'
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
@@ -1554,11 +1577,28 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
             'listen': no_value_msg,
         },
     }
-    # for a running instance bin_dir will be gathered from the postmaster process
+
+    if not sample:
+        enrich_config_from_running_instance(config, no_value_msg, dsn)
+
+    # some work around bin_dir definition
     if sample and bin_dir:
         config['postgresql']['bin_dir'] = bin_dir
+    elif not sample:
+        config['postgresql']['bin_dir'] = get_bin_dir_from_running_instance(config['postgresql']['data_dir'])
 
-    if sample:  # some sane defaults or values set via Patroni env vars
+    if 'bin_dir' in config['postgresql']:
+        # obtain version from the binary
+        try:
+            pg_version = postgres_major_version_to_int(get_major_version(config['postgresql']['bin_dir'] or None))
+        except PatroniException as e:
+            raise PatroniCtlException(str(e))
+    else:
+        config['postgresql']['bin_dir'] = ''
+
+    # generate sample config
+    if sample:
+        # some sane defaults or values set via Patroni env vars
         replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
         config['postgresql']['authentication'] = {
             'superuser': {
@@ -1570,34 +1610,26 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
                 'password': os.getenv('PATRONI_REPLICATION_PASSWORD', no_value_msg)
             }
         }
-        config['postgresql']['pg_hba'] = [
-            'host all all 0.0.0.0/0 md5',
-            f'host replication {replicator} all md5'
-        ]
-    else:  # or real values
-        enrich_config_from_running_instance(config, no_value_msg, dsn)
 
-    if 'bin_dir' in config['postgresql']:
-        # obtain version from the binary
-        try:
-            pg_version = postgres_major_version_to_int(get_major_version(config['postgresql']['bin_dir'] or None))
-        except PatroniException as e:
-            raise PatroniCtlException(str(e))
+        auth_method = 'scram-sha-256' if pg_version and pg_version >= 100000 else 'md5'
+        config['postgresql']['pg_hba'] = [
+            f'host all all all {auth_method}',
+            f'host replication {replicator} all {auth_method}'
+        ]
 
         # add version-specific configuration
-        if dynamic_config['postgresql']['parameters'].keys().isdisjoint({'wal_keep_size', 'wal_keep_segments'}):
+        if pg_version:
             from patroni.postgresql.config import ConfigHandler
             wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
             config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
                 ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
-        if sample and pg_version >= 110000:
-            config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
-            config['postgresql']['authentication']['rewind'] = {
-                'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
-                'password': no_value_msg
-            }
-    else:
-        config['postgresql']['bin_dir'] = ''
+
+            if pg_version >= 110000:
+                config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
+                config['postgresql']['authentication']['rewind'] = {
+                    'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
+                    'password': no_value_msg
+                }
 
     # redundant values from the default config
     del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
