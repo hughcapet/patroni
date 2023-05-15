@@ -13,7 +13,7 @@ from patroni.utils import deep_compare
 from queue import Queue, Full
 from threading import Lock, Thread
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class QueueHandler(logging.Handler):
     def __init__(self) -> None:
         """Queue initialised and initial records_lost established."""
         super().__init__()
-        self.queue = Queue()
+        self.queue: Queue[Union[logging.LogRecord, None]] = Queue()
         self._records_lost = 0
 
     def _put_record(self, record: logging.LogRecord) -> None:
@@ -189,10 +189,10 @@ class PatroniLogger(Thread):
         super(PatroniLogger, self).__init__()
         self._queue_handler = QueueHandler()
         self._root_logger = logging.getLogger()
-        self._config = None
+        self._config: Optional[Dict[str, Any]] = None
         self.log_handler = None
         self.log_handler_lock = Lock()
-        self._old_handlers = []
+        self._old_handlers: List[logging.Handler] = []
         # initially set log level to ``DEBUG`` while the logger thread has not started running yet. The daemon process
         # will later adjust all log related settings with what was provided through the user configuration file.
         self.reload_config({'level': 'DEBUG'})
@@ -249,8 +249,9 @@ class PatroniLogger(Thread):
                 if not isinstance(self.log_handler, RotatingFileHandler):
                     new_handler = RotatingFileHandler(os.path.join(config['dir'], __name__))
                 handler = new_handler or self.log_handler
-                assert isinstance(handler, RotatingFileHandler)
-                handler.maxBytes = int(config.get('file_size', 25000000))
+                if TYPE_CHECKING:  # pragma: no cover
+                    assert isinstance(handler, RotatingFileHandler)
+                handler.maxBytes = int(config.get('file_size', 25000000))  # pyright: ignore [reportGeneralTypeIssues]
                 handler.backupCount = int(config.get('file_num', 4))
             else:
                 if self.log_handler is None or isinstance(self.log_handler, RotatingFileHandler):
@@ -306,7 +307,8 @@ class PatroniLogger(Thread):
 
         while True:
             self._close_old_handlers()
-            assert self.log_handler is not None
+            if TYPE_CHECKING:  # pragma: no cover
+                assert self.log_handler is not None
 
             record = self._queue_handler.queue.get(True)
             # special message that indicates Patroni is shutting down
