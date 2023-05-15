@@ -379,11 +379,9 @@ class Directory(object):
         :rtype: Iterator[:class:`Result`] objects with the error message containing the name of the executable,
                 if any check fails.
         """
-        if not self.contains_executable:
-            return
-        for program in self.contains_executable:
+        for program in self.contains_executable or []:
             if not shutil.which(program, path=path):
-                yield Result(False, f"does not contain '{program}' in {(path or 'PATH')}")
+                yield Result(False, f"does not contain '{program}' in '{(path or '$PATH')}'")
 
     def validate(self, name: str) -> Iterator[Result]:
         """Check if the expected paths and executables can be found under *name* directory.
