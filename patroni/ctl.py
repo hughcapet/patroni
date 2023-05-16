@@ -1427,8 +1427,8 @@ def get_bin_dir_from_running_instance(data_dir: str) -> str:
             postmaster_pid = int(postmaster_pid.strip())
     except OSError as e:
         raise PatroniCtlException(f'Error while reading postmaster.pid file: {e}')
+    import psutil
     try:
-        import psutil
         return os.path.dirname(psutil.Process(postmaster_pid).exe())
     except psutil.NoSuchProcess:
         raise PatroniCtlException('Obtained postmaster pid doesn\'t exist')
@@ -1461,7 +1461,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
             patroni_socket.close()
         return ip
 
-    su_params = {}
+    su_params: Dict[str, str] = {}
     parsed_dsn = {}
 
     if dsn:
@@ -1607,7 +1607,7 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
 
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-    config = {
+    config: Dict[str, Any] = {
         'scope': scope or no_value_msg,
         'name': socket.gethostname(),
         'bootstrap': {
@@ -1682,7 +1682,8 @@ def generate_config(scope: str, file: str, sample: bool, dsn: Optional[str], bin
     # no value instead of 'none' in the parsed yaml
     yaml.add_representer(
         type(None),
-        lambda dumper, _: dumper.represent_scalar(u'tag:yaml.org,2002:null', ''),
+        lambda dumper, _:
+            dumper.represent_scalar(u'tag:yaml.org,2002:null', ''),  # pyright: ignore [reportUnknownMemberType]
         Dumper=yaml.SafeDumper
     )
     dir_path = os.path.dirname(file)
