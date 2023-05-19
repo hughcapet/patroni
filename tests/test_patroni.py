@@ -176,7 +176,6 @@ class TestPatroni(unittest.TestCase):
         config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
         config['postgresql']['parameters']['hba_file'] = '/hba/file/path'
         config['postgresql']['parameters']['ident_file'] = '/ident/file/path'
-        config['postgresql']['pg_ident'] = ['foo bar foobar', 'foobar bar foo']
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
         config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
         config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
@@ -198,7 +197,7 @@ class TestPatroni(unittest.TestCase):
         del config['postgresql']['authentication']['rewind']
 
         hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
-        ident_content = '\n'.join(config['postgresql']['pg_ident'] + ['# something very interesting', '  '])
+        ident_content = '\n'.join(['# something very interesting', '  '])
         open_res = []
         for _ in range(5):
             open_res.extend([

@@ -162,6 +162,8 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     except OSError as e:
         print(f'Failed to read ident_file: {e}', file=sys.stderr)
         sys.exit(1)
+    if not config['postgresql']['pg_ident']:
+        del config['postgresql']['pg_ident']
 
     config['postgresql']['authentication'] = {
         'superuser': su_params,
