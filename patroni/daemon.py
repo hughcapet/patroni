@@ -129,8 +129,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                        'hba_file', 'ident_file', 'config_file'):
                 # write commands to the local config due to security implications
                 # write hba/ident/config_file to local config to ensure they are not removed later
-                if not config['postgresql']['parameters']:
-                    config['postgresql']['parameters'] = {}
+                config['postgresql'].setdefault('parameters', {})
                 config['postgresql']['parameters'][p] = v
             else:
                 config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
@@ -220,7 +219,6 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
         },
         'postgresql': {
             'data_dir': no_value_msg,
-            'parameters': None,
             'connect_address': no_value_msg,
             'listen': no_value_msg,
         },
@@ -282,13 +280,6 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
     del config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
     del config['bootstrap']['dcs']['standby_cluster']
 
-    # no value instead of 'none' in the parsed yaml
-    yaml.add_representer(
-        type(None),
-        lambda dumper, _:
-            dumper.represent_scalar(u'tag:yaml.org,2002:null', ''),  # pyright: ignore [reportUnknownMemberType]
-        Dumper=yaml.SafeDumper
-    )
     dir_path = os.path.dirname(file)
     if dir_path and not os.path.isdir(dir_path):
         os.makedirs(dir_path)

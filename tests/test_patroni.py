@@ -125,7 +125,6 @@ class TestPatroni(unittest.TestCase):
                 'listen': no_value_msg,
                 'pg_hba': ['host all all all md5',
                            f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all md5'],
-                'parameters': None,
                 'authentication': {'superuser': {'username': os.environ['PATRONI_SUPERUSER_USERNAME'],
                                                  'password': os.environ['PATRONI_SUPERUSER_PASSWORD']},
                                    'replication': {'username': os.environ["PATRONI_REPLICATION_USERNAME"],
