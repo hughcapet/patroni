@@ -15,7 +15,7 @@ from patroni.api import RestApiServer
 from patroni.async_executor import AsyncExecutor
 from patroni.dcs.etcd import AbstractEtcdClientWithFailover
 from patroni.config import Config
-from patroni.exceptions import DCSError, PatroniException
+from patroni.exceptions import DCSError
 from patroni.postgresql import Postgresql
 from patroni.postgresql.config import ConfigHandler
 from patroni import check_psycopg
@@ -95,7 +95,8 @@ class TestPatroni(unittest.TestCase):
         mock_stderr.seek(0)
 
         # 1.2 User is not a superuser
-        with patch('sys.argv', ['patroni.py', '--generate-config', '--dsn', 'host=foo port=bar user=foobar password=pwd_from_dsn']),\
+        with patch('sys.argv', ['patroni.py',
+                                '--generate-config', '--dsn', 'host=foo port=bar user=foobar password=pwd_from_dsn']),\
              patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True),\
              self.assertRaises(SystemExit) as e:
             patroni_main()
@@ -153,8 +154,9 @@ class TestPatroni(unittest.TestCase):
         config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
         config['postgresql']['authentication']['rewind'] = {'username': os.environ['PATRONI_REWIND_USERNAME'],
                                                             'password': no_value_msg}
-        config['postgresql']['pg_hba'] = ['host all all all scram-sha-256',
-                                          f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all scram-sha-256']
+        config['postgresql']['pg_hba'] = \
+            ['host all all all scram-sha-256',
+             f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all scram-sha-256']
         with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
              patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")),\
              self.assertRaises(SystemExit) as e:
@@ -254,7 +256,8 @@ class TestPatroni(unittest.TestCase):
                                                               OSError,  # 3.3 Failed to open postmaster.pid
                                                               mock_open(read_data=hba_content)(),
                                                               mock_open(read_data=ident_content)(),
-                                                              mock_open(read_data='1984')()  # 3.4 Invalid postmaster pid
+                                                              # 3.4 Invalid postmaster pid
+                                                              mock_open(read_data='1984')()
                                                               ])):
                     with self.assertRaises(SystemExit) as e:
                         patroni_main()

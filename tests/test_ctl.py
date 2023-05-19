@@ -1,17 +1,15 @@
 import etcd
 import mock
 import os
-import psutil
 import unittest
 
 from click.testing import CliRunner
 from datetime import datetime, timedelta
-from mock import mock_open, patch, Mock, MagicMock, PropertyMock
+from mock import patch, Mock, PropertyMock
 from patroni.ctl import ctl, load_config, output_members, get_dcs, parse_dcs, \
     get_all_members, get_any_member, get_cursor, query_member, PatroniCtlException, apply_config_changes, \
     format_config_for_editing, show_diff, invoke_editor, format_pg_version, CONFIG_FILE_PATH, PatronictlPrettyTable
 from patroni.dcs.etcd import AbstractEtcdClientWithFailover, Cluster, Failover
-from patroni.config import Config
 from patroni.psycopg import OperationalError
 from patroni.utils import tzutc
 from prettytable import PrettyTable, ALL
@@ -688,6 +686,7 @@ class TestCtl(unittest.TestCase):
             result = self.runner.invoke(ctl, ['reinit', 'alpha', 'other', '--wait'], input='y\ny')
         self.assertIn("Waiting for reinitialize to complete on: other", result.output)
         self.assertIn("Reinitialize is completed on: other", result.output)
+
 
 class TestPatronictlPrettyTable(unittest.TestCase):
 
