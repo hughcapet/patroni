@@ -24,6 +24,19 @@ if TYPE_CHECKING:  # pragma: no cover
     from .validator import Schema
 
 
+def get_local_ip() -> str:
+    patroni_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        patroni_socket.connect(('8.8.8.8', 80))
+        ip = patroni_socket.getsockname()[0]
+    except OSError as e:
+        print(f'Failed to define local ip: {e}', file=sys.stderr)
+        sys.exit(1)
+    finally:
+        patroni_socket.close()
+    return ip
+
+
 def get_bin_dir_from_running_instance(data_dir: str) -> str:
     postmaster_pid = None
     try:
@@ -59,18 +72,6 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     from getpass import getuser, getpass
     from patroni.postgresql.config import parse_dsn
     from patroni.config import AUTH_ALLOWED_PARAMETERS_MAPPING
-
-    def get_local_ip() -> str:
-        patroni_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            patroni_socket.connect(('8.8.8.8', 80))
-            ip = patroni_socket.getsockname()[0]
-        except OSError as e:
-            print(f'Failed to define local ip: {e}', file=sys.stderr)
-            sys.exit(1)
-        finally:
-            patroni_socket.close()
-        return ip
 
     su_params: Dict[str, str] = {}
     parsed_dsn = {}
@@ -137,7 +138,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     conn.close()
 
     port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
-    connect_host = parsed_dsn.get('host', os.getenv('PGHOST', get_local_ip()))
+    connect_host = parsed_dsn.get('host', os.getenv('PGHOST')) or get_local_ip()
     connect_port = parsed_dsn.get('port', os.getenv('PGPORT', port))
     config['postgresql']['connect_address'] = f'{connect_host}:{connect_port}'
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
@@ -210,6 +211,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
     no_value_msg = '#FIXME'
     pg_version = None
+    local_ip = get_local_ip()
 
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
@@ -224,6 +226,10 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
             'connect_address': no_value_msg,
             'listen': no_value_msg,
         },
+        'restapi': {
+            'connect_address': os.getenv('PATRONI_RESTAPI_CONNECT_ADDRESS', f'{local_ip}:8008'),
+            'listen': os.getenv('PATRONI_RESTAPI_LISTEN') or f'{local_ip}:8008'
+        }
     }
 
     if not sample:

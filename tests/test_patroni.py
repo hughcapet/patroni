@@ -83,6 +83,8 @@ class TestPatroni(unittest.TestCase):
         os.environ['PGUSER'] = 'pguser_from_env'
         os.environ['PGPASSWORD'] = 'pguser_pwd_from_env'
         os.environ['PGHOST'] = 'pghost_from_env'
+        os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'] = 'localhost:8080'
+        os.environ['PATRONI_RESTAPI_LISTEN'] = 'localhost:8080'
 
         # 1. Wrong input
         # 1.1 Wrong DSN format
@@ -130,6 +132,10 @@ class TestPatroni(unittest.TestCase):
                                    'replication': {'username': os.environ["PATRONI_REPLICATION_USERNAME"],
                                                    'password': os.environ['PATRONI_REPLICATION_PASSWORD']}},
                 'bin_dir': os.environ['PATRONI_POSTGRESQL_BIN_DIR']
+            },
+            'restapi': {
+                'connect_address': os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'],
+                'listen': os.environ['PATRONI_RESTAPI_LISTEN']
             }
         }
 
