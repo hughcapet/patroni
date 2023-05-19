@@ -121,6 +121,7 @@ class TestPatroni(unittest.TestCase):
             },
             'postgresql': {
                 'connect_address': no_value_msg,
+                'data_dir': no_value_msg,
                 'listen': no_value_msg,
                 'pg_hba': ['host all all all md5',
                            f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all md5'],

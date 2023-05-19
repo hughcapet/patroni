@@ -219,6 +219,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
             'dcs': dynamic_config
         },
         'postgresql': {
+            'data_dir': no_value_msg,
             'parameters': None,
             'connect_address': no_value_msg,
             'listen': no_value_msg,
