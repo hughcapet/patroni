@@ -30,8 +30,7 @@ def get_local_ip() -> str:
         patroni_socket.connect(('8.8.8.8', 80))
         ip = patroni_socket.getsockname()[0]
     except OSError as e:
-        print(f'Failed to define local ip: {e}', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f'Failed to define local ip: {e}')
     finally:
         patroni_socket.close()
     return ip
@@ -43,18 +42,15 @@ def get_bin_dir_from_running_instance(data_dir: str) -> str:
         with open(f"{data_dir}/postmaster.pid", 'r') as f:
             postmaster_pid = f.readline()
             if not postmaster_pid:
-                print('Failed to obtain postmaster pid from postmaster.pid file', file=sys.stderr)
-                sys.exit(1)
+                sys.exit('Failed to obtain postmaster pid from postmaster.pid file')
             postmaster_pid = int(postmaster_pid.strip())
     except OSError as e:
-        print(f'Error while reading postmaster.pid file: {e}', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f'Error while reading postmaster.pid file: {e}')
     import psutil
     try:
         return os.path.dirname(psutil.Process(postmaster_pid).exe())
     except psutil.NoSuchProcess:
-        print('Obtained postmaster pid doesn\'t exist', file=sys.stderr)
-        sys.exit(1)
+        sys.exit('Obtained postmaster pid doesn\'t exist')
 
 
 def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: str, dsn: Optional[str] = None) -> None:
@@ -79,8 +75,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     if dsn:
         parsed_dsn = parse_dsn(dsn)
         if not parsed_dsn:
-            print('Failed to parse DSN string', file=sys.stderr)
-            sys.exit(1)
+            sys.exit('Failed to parse DSN string')
 
     # gather auth parameters for the superuser config
     for conn_param, env_var in AUTH_ALLOWED_PARAMETERS_MAPPING.items():
@@ -95,14 +90,12 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     try:
         conn = psycopg.connect(dsn=dsn, password=su_params['password'])
     except psycopg.Error as e:
-        print(f'Failed to establish PostgreSQL connection: {e}', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f'Failed to establish PostgreSQL connection: {e}')
 
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname=%s AND rolsuper='t';", (su_params['username'],))
         if cur.rowcount < 1:
-            print('The provided user does not have superuser privilege', file=sys.stderr)
-            sys.exit(1)
+            sys.exit('The provided user does not have superuser privilege')
 
         cur.execute("SELECT name, current_setting(name) FROM pg_settings \
                      WHERE context <> 'internal' \
@@ -119,6 +112,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                                  'wal_keep_segments', 'wal_keep_size', \
                                  'track_commit_timestamp');")
 
+        helper_dict = dict.fromkeys(['port', 'listen_addresses'])
         # adjust values
         for p, v in cur.fetchall():
             if p == 'data_directory':
@@ -132,17 +126,16 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                 # write hba/ident/config_file to local config to ensure they are not removed later
                 config['postgresql'].setdefault('parameters', {})
                 config['postgresql']['parameters'][p] = v
+            elif p in ('port', 'listen_addresses'):
+                helper_dict[p] = v
             else:
                 config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
 
     conn.close()
 
-    port = config['bootstrap']['dcs']['postgresql']['parameters']['port']
-    connect_host = parsed_dsn.get('host', os.getenv('PGHOST')) or get_local_ip()
-    connect_port = parsed_dsn.get('port', os.getenv('PGPORT', port))
-    config['postgresql']['connect_address'] = f'{connect_host}:{connect_port}'
-    listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
-    config['postgresql']['listen'] = f'{listen_addresses}:{port}'
+    connect_port = parsed_dsn.get('port', os.getenv('PGPORT', helper_dict['port']))
+    config['postgresql']['connect_address'] = f'{get_local_ip()}:{connect_port}'
+    config['postgresql']['listen'] = f'{helper_dict["listen_addresses"]}:{helper_dict["port"]}'
 
     # it makes sense to define postgresql.pg_hba/pg_ident only if hba_file/ident_file are set to defaults
     default_hba_path = os.path.join(config['postgresql']['data_dir'], 'pg_hba.conf')
@@ -157,8 +150,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                                                                    'hostgssenc',
                                                                    'hostnogssenc'))]
         except OSError as e:
-            print(f'Failed to read pg_hba.conf: {e}', file=sys.stderr)
-            sys.exit(1)
+            sys.exit(f'Failed to read pg_hba.conf: {e}')
 
     default_ident_path = os.path.join(config['postgresql']['data_dir'], 'pg_ident.conf')
     if config['postgresql']['parameters']['ident_file'] == default_ident_path:
@@ -167,8 +159,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                 config['postgresql']['pg_ident'] = [i.strip() for i in f.readlines()
                                                     if i.strip() and not i.startswith('#')]
         except OSError as e:
-            print(f'Failed to read pg_ident.conf: {e}', file=sys.stderr)
-            sys.exit(1)
+            sys.exit(f'Failed to read pg_ident.conf: {e}')
         if not config['postgresql']['pg_ident']:
             del config['postgresql']['pg_ident']
 
@@ -204,7 +195,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
           If not a sample config, either DSN or PG ENV vars are used to define superuser authentication parameters.
         - rewind user is defined for a sample config if PG version can be defined and PG version is 11+
           (if possible, username is set from the respective Patroni ENV var)
-    - ``bootsrtap.dcs.postgresql.use_pg_rewind set to True if PG version is 11+
+    - ``bootsrtap.dcs.postgresql.use_pg_rewind
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
     - ``postgresql.pg_ident`` the lines gathered from the source instance's ident_file
 
@@ -250,8 +241,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
     try:
         pg_version = postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None))
     except PatroniException as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+        sys.exit(str(e))
 
     # generate sample config
     if sample:
@@ -269,6 +259,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
         }
 
         auth_method = 'scram-sha-256' if pg_version and pg_version >= 100000 else 'md5'
+        config['postgresql']['parameters'] = {'password_encryption': auth_method}
         config['postgresql']['pg_hba'] = [
             f'host all all all {auth_method}',
             f'host replication {replicator} all {auth_method}'
@@ -281,17 +272,14 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
             config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
                 ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
 
+            config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
             if pg_version >= 110000:
-                config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
                 config['postgresql']['authentication']['rewind'] = {
                     'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
                     'password': no_value_msg
                 }
 
     # redundant values from the default config
-    del config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
-    del config['bootstrap']['dcs']['postgresql']['parameters']['port']
-    del config['bootstrap']['dcs']['postgresql']['parameters']['cluster_name']
     del config['bootstrap']['dcs']['standby_cluster']
 
     dir_path = os.path.dirname(file)

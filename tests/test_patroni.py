@@ -1,5 +1,4 @@
 import etcd
-from io import StringIO
 import logging
 import os
 import psutil
@@ -66,12 +65,13 @@ class TestPatroni(unittest.TestCase):
             self.assertRaises(SystemExit, patroni_main)
 
     @patch('patroni.psycopg.connect', psycopg_connect)
+    @patch('socket.socket.connect', Mock())
+    @patch('socket.socket.getsockname', Mock(return_value=('1.9.8.4', 1984)))
     @patch('builtins.open', MagicMock())
     @patch('socket.gethostname', Mock(return_value='testhost'))
     @patch('os.makedirs')
     @patch('yaml.safe_dump')
-    @patch('sys.stderr', new_callable=StringIO)
-    def test_generate_sample_config(self, mock_stderr, mock_config_dump, mock_makedir):
+    def test_generate_sample_config(self, mock_config_dump, mock_makedir):
         self.maxDiff = None
         os.environ['PATRONI_SCOPE'] = 'scope_from_env'
         os.environ['PATRONI_POSTGRESQL_BIN_DIR'] = '/bin/from/env'
@@ -82,7 +82,6 @@ class TestPatroni(unittest.TestCase):
         os.environ['PATRONI_REWIND_USERNAME'] = 'rewind_user_from_env'
         os.environ['PGUSER'] = 'pguser_from_env'
         os.environ['PGPASSWORD'] = 'pguser_pwd_from_env'
-        os.environ['PGHOST'] = 'pghost_from_env'
         os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'] = 'localhost:8080'
         os.environ['PATRONI_RESTAPI_LISTEN'] = 'localhost:8080'
 
@@ -91,10 +90,7 @@ class TestPatroni(unittest.TestCase):
         with patch('sys.argv', ['patroni.py', '--generate-config', '--dsn', 'host:foo port:bar user:foobar']),\
              self.assertRaises(SystemExit) as e:
             patroni_main()
-        self.assertEqual(e.exception.code, 1)
-        self.assertIn('Failed to parse DSN string', mock_stderr.getvalue())
-        mock_stderr.truncate(0)
-        mock_stderr.seek(0)
+        self.assertIn('Failed to parse DSN string', e.exception.code)
 
         # 1.2 User is not a superuser
         with patch('sys.argv', ['patroni.py',
@@ -102,18 +98,14 @@ class TestPatroni(unittest.TestCase):
              patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True),\
              self.assertRaises(SystemExit) as e:
             patroni_main()
-        self.assertEqual(e.exception.code, 1)
-        self.assertIn('The provided user does not have superuser privilege', mock_stderr.getvalue())
-        mock_stderr.truncate(0)
-        mock_stderr.seek(0)
+        self.assertIn('The provided user does not have superuser privilege', e.exception.code)
 
         no_value_msg = '#FIXME'
         dynamic_config = Config.get_default_config()
         dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
         del dynamic_config['standby_cluster']
-        for p in ('cluster_name', 'listen_addresses', 'port'):
-            del dynamic_config['postgresql']['parameters'][p]
         dynamic_config['postgresql']['parameters']['wal_keep_segments'] = 8
+        dynamic_config['postgresql']['use_pg_rewind'] = True
 
         config = {
             'scope': os.environ['PATRONI_SCOPE'],
@@ -131,7 +123,8 @@ class TestPatroni(unittest.TestCase):
                                                  'password': os.environ['PATRONI_SUPERUSER_PASSWORD']},
                                    'replication': {'username': os.environ["PATRONI_REPLICATION_USERNAME"],
                                                    'password': os.environ['PATRONI_REPLICATION_PASSWORD']}},
-                'bin_dir': os.environ['PATRONI_POSTGRESQL_BIN_DIR']
+                'bin_dir': os.environ['PATRONI_POSTGRESQL_BIN_DIR'],
+                'parameters': {'password_encryption': 'md5'}
             },
             'restapi': {
                 'connect_address': os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'],
@@ -157,9 +150,9 @@ class TestPatroni(unittest.TestCase):
         # 2.2 pg_version >= 13
         del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-        config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
         config['postgresql']['authentication']['rewind'] = {'username': os.environ['PATRONI_REWIND_USERNAME'],
                                                             'password': no_value_msg}
+        config['postgresql']['parameters']['password_encryption'] = 'scram-sha-256'
         config['postgresql']['pg_hba'] = \
             ['host all all all scram-sha-256',
              f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all scram-sha-256']
@@ -177,7 +170,7 @@ class TestPatroni(unittest.TestCase):
 
         # values are taken from tests/__init__.py
         config['scope'] = 'my_cluster'  # cluster_name
-        config['postgresql']['connect_address'] = 'foo:bar'
+        config['postgresql']['connect_address'] = '1.9.8.4:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
         config['postgresql']['parameters']['hba_file'] = os.path.join('data', 'pg_hba.conf')
@@ -235,7 +228,7 @@ class TestPatroni(unittest.TestCase):
             del config['postgresql']['authentication']['superuser']['sslmode']
             config['postgresql']['authentication']['superuser']['username'] = os.environ['PGUSER']
             config['postgresql']['authentication']['superuser']['password'] = os.environ['PGPASSWORD']
-            config['postgresql']['connect_address'] = f"{os.environ['PGHOST']}:1984"
+            config['postgresql']['connect_address'] = '1.9.8.4:1984'
 
             with patch('sys.argv', ['patroni.py', '--generate-config']):
 
@@ -250,8 +243,7 @@ class TestPatroni(unittest.TestCase):
                 with patch('subprocess.check_output', Mock(side_effect=OSError)),\
                      self.assertRaises(SystemExit) as e:
                     patroni_main()
-                self.assertEqual(e.exception.code, 1)
-                self.assertIn('Failed to get postgres version:', mock_stderr.getvalue())
+                self.assertIn('Failed to get postgres version:', e.exception.code)
 
                 with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(),
                                                               mock_open(read_data=ident_content)(),
@@ -266,42 +258,42 @@ class TestPatroni(unittest.TestCase):
                                                               ])):
                     with self.assertRaises(SystemExit) as e:
                         patroni_main()
-                    self.assertEqual(e.exception.code, 1)
+                    self.assertIn('Failed to obtain postmaster pid from postmaster.pid file', e.exception.code)
 
                     with self.assertRaises(SystemExit) as e:
                         patroni_main()
-                    self.assertEqual(e.exception.code, 1)
+                    self.assertIn('Error while reading postmaster.pid file', e.exception.code)
 
                     with patch('psutil.Process.__init__', Mock(return_value=None)),\
                          patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))),\
                          self.assertRaises(SystemExit) as e:
                         patroni_main()
-                    self.assertEqual(e.exception.code, 1)
+                    self.assertIn("Obtained postmaster pid doesn't exist", e.exception.code)
 
                 # 3.5 Failed to open pg_hba
                 with patch('builtins.open', Mock(side_effect=OSError)),\
                      self.assertRaises(SystemExit) as e:
                     patroni_main()
-                self.assertEqual(e.exception.code, 1)
+                self.assertIn('Failed to read pg_hba.conf', e.exception.code)
 
                 # 3.6 Failed to open pg_ident
                 with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(), OSError])),\
                      self.assertRaises(SystemExit) as e:
                     patroni_main()
-                self.assertEqual(e.exception.code, 1)
+                self.assertIn('Failed to read pg_ident.conf', e.exception.code)
 
                 # 3.7 Failed PG connecttion
                 from . import psycopg
                 with patch('patroni.psycopg.connect', side_effect=psycopg.Error),\
                      self.assertRaises(SystemExit) as e:
                     patroni_main()
-                self.assertEqual(e.exception.code, 1)
+                self.assertIn('Failed to establish PostgreSQL connection', e.exception.code)
 
                 # 3.8 Failed to get local IP
                 with patch('socket.socket.connect', Mock(side_effect=OSError)),\
                      self.assertRaises(SystemExit) as e:
                     patroni_main()
-                self.assertEqual(e.exception.code, 1)
+                self.assertIn('Failed to define local ip', e.exception.code)
 
     @patch('pkgutil.iter_importers', Mock(return_value=[MockFrozenImporter()]))
     @patch('sys.frozen', Mock(return_value=True), create=True)
