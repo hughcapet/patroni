@@ -61,7 +61,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     """Get
     - non-internal GUC values having configuration file, postmaster command line or environment variable as a source
     - postgresql.connect_address, postgresql.listen,
-    - postgresql.pg_hba and postgresql.pg_ident
+    - postgresql.pg_hba and postgresql.pg_ident if hba_file/ident_file is set to the default value
     - superuser auth parameters (from the options used for connection)
     And redefine scope with the clister_name GUC value if set
 
@@ -144,27 +144,33 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     listen_addresses = config['bootstrap']['dcs']['postgresql']['parameters']['listen_addresses']
     config['postgresql']['listen'] = f'{listen_addresses}:{port}'
 
-    try:
-        with open(f"{config['postgresql']['parameters']['hba_file']}", 'r') as f:
-            config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
-                                              if i.startswith(('local',
-                                                               'host',
-                                                               'hostssl',
-                                                               'hostnossl',
-                                                               'hostgssenc',
-                                                               'hostnogssenc'))]
-    except OSError as e:
-        print(f'Failed to read hba_file: {e}', file=sys.stderr)
-        sys.exit(1)
+    # it makes sense to define postgresql.pg_hba/pg_ident only if hba_file/ident_file are set to defaults
+    default_hba_path = os.path.join(config['postgresql']['data_dir'], 'pg_hba.conf')
+    if config['postgresql']['parameters']['hba_file'] == default_hba_path:
+        try:
+            with open(default_hba_path, 'r') as f:
+                config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
+                                                  if i.startswith(('local',
+                                                                   'host',
+                                                                   'hostssl',
+                                                                   'hostnossl',
+                                                                   'hostgssenc',
+                                                                   'hostnogssenc'))]
+        except OSError as e:
+            print(f'Failed to read pg_hba.conf: {e}', file=sys.stderr)
+            sys.exit(1)
 
-    try:
-        with open(f"{config['postgresql']['parameters']['ident_file']}", 'r') as f:
-            config['postgresql']['pg_ident'] = [i.strip() for i in f.readlines() if i.strip() and not i.startswith('#')]
-    except OSError as e:
-        print(f'Failed to read ident_file: {e}', file=sys.stderr)
-        sys.exit(1)
-    if not config['postgresql']['pg_ident']:
-        del config['postgresql']['pg_ident']
+    default_ident_path = os.path.join(config['postgresql']['data_dir'], 'pg_ident.conf')
+    if config['postgresql']['parameters']['ident_file'] == default_ident_path:
+        try:
+            with open(default_ident_path, 'r') as f:
+                config['postgresql']['pg_ident'] = [i.strip() for i in f.readlines()
+                                                    if i.strip() and not i.startswith('#')]
+        except OSError as e:
+            print(f'Failed to read pg_ident.conf: {e}', file=sys.stderr)
+            sys.exit(1)
+        if not config['postgresql']['pg_ident']:
+            del config['postgresql']['pg_ident']
 
     config['postgresql']['authentication'] = {
         'superuser': su_params,

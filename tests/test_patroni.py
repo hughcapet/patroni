@@ -180,14 +180,14 @@ class TestPatroni(unittest.TestCase):
         config['postgresql']['connect_address'] = 'foo:bar'
         config['postgresql']['listen'] = '6.6.6.6:1984'
         config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
-        config['postgresql']['parameters']['hba_file'] = '/hba/file/path'
-        config['postgresql']['parameters']['ident_file'] = '/ident/file/path'
+        config['postgresql']['parameters']['hba_file'] = os.path.join('data', 'pg_hba.conf')
+        config['postgresql']['parameters']['ident_file'] = os.path.join('data', 'pg_ident.conf')
         config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
         config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
         config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
         config['bootstrap']['dcs']['postgresql']['parameters']['max_wal_senders'] = 37
         config['bootstrap']['dcs']['postgresql']['parameters']['wal_level'] = 'replica'
-        config['postgresql']['data_dir'] = '/foo/bar/data'
+        config['postgresql']['data_dir'] = 'data'
         config['postgresql']['bin_dir'] = '/bin/dir/from/running'
         config['postgresql']['authentication']['superuser'] = {
             'username': 'foobar',
@@ -205,7 +205,7 @@ class TestPatroni(unittest.TestCase):
         hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
         ident_content = '\n'.join(['# something very interesting', '  '])
         open_res = []
-        for _ in range(5):
+        for _ in range(3):
             open_res.extend([
                 mock_open(read_data=hba_content)(),
                 mock_open(read_data=ident_content)(),

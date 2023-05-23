@@ -22,7 +22,6 @@ import urllib3
 import time
 import yaml
 
-
 from collections import defaultdict
 from contextlib import contextmanager
 from prettytable import ALL, FRAME, PrettyTable
