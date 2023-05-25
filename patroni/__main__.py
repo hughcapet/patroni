@@ -1,14 +1,15 @@
 import logging
 import os
 import signal
+import sys
 import time
 
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional
 
 from patroni.daemon import AbstractPatroniDaemon, abstract_main
+from patroni.config_generator import generate_config
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .config import Config
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -135,10 +136,37 @@ class Patroni(AbstractPatroniDaemon):
 
 def patroni_main() -> None:
     from multiprocessing import freeze_support
-    from patroni.validator import schema
-
     freeze_support()
-    abstract_main(Patroni, schema)
+
+    from .daemon import get_base_arg_parser
+    parser = get_base_arg_parser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--validate-config', action='store_true', help='Run config validator and exit')
+    group.add_argument('--generate-sample-config', action='store_true',
+                       help='Generate a sample Patroni yaml configuration file')
+    group.add_argument('--generate-config', action='store_true',
+                       help='Generate a Patroni yaml configuration file for a running instance')
+    parser.add_argument('--dsn', help='Optional DSN string of the instance to be used as a source \
+                                    for config generation. Superuser connection is required.')
+    args = parser.parse_args()
+
+    if args.generate_sample_config:
+        generate_config(args.configfile or '/tmp/patroni.yml', True, None)
+        sys.exit(0)
+    elif args.generate_config:
+        generate_config(args.configfile or '/tmp/patroni.yml', False, args.dsn)
+        sys.exit(0)
+    elif args.validate_config:
+        from patroni.validator import schema
+        from patroni.config import ConfigParseError
+
+        try:
+            Config(args.configfile, validator=schema)
+            sys.exit()
+        except ConfigParseError as e:
+            sys.exit(e.value)
+
+    abstract_main(Patroni, args.configfile)
 
 
 def main() -> None:
