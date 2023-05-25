@@ -9,16 +9,16 @@ from .exceptions import PatroniException
 from .postgresql.misc import postgres_major_version_to_int
 
 
-def get_local_ip() -> str:
-    patroni_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def get_ip() -> str:
+    hostname = None
     try:
-        patroni_socket.connect(('8.8.8.8', 80))
-        ip = patroni_socket.getsockname()[0]
+        hostname = socket.gethostname()
+        return sorted(socket.getaddrinfo(hostname, 0, socket.AF_UNSPEC, socket.SOCK_STREAM, 0),
+                      key=lambda x: x[0])[0][4][0]
     except OSError as e:
-        sys.exit(f'Failed to define local ip: {e}')
-    finally:
-        patroni_socket.close()
-    return ip
+        sys.exit(f'Failed to define ip address: {e}')
+    except IndexError:
+        sys.exit(f'Failed to define ip address. No address returned by getaddrinfo for {hostname}')
 
 
 def get_bin_dir_from_running_instance(data_dir: str) -> str:
@@ -119,7 +119,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     conn.close()
 
     connect_port = parsed_dsn.get('port', os.getenv('PGPORT', helper_dict['port']))
-    config['postgresql']['connect_address'] = f'{get_local_ip()}:{connect_port}'
+    config['postgresql']['connect_address'] = f'{get_ip()}:{connect_port}'
     config['postgresql']['listen'] = f'{helper_dict["listen_addresses"]}:{helper_dict["port"]}'
 
     # it makes sense to define postgresql.pg_hba/pg_ident only if hba_file/ident_file are set to defaults
@@ -193,7 +193,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
     no_value_msg = '#FIXME'
     pg_version = None
-    local_ip = get_local_ip()
+    local_ip = get_ip()
 
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])

@@ -65,8 +65,7 @@ class TestPatroni(unittest.TestCase):
             self.assertRaises(SystemExit, patroni_main)
 
     @patch('patroni.psycopg.connect', psycopg_connect)
-    @patch('socket.socket.connect', Mock())
-    @patch('socket.socket.getsockname', Mock(return_value=('1.9.8.4', 1984)))
+    @patch('socket.getaddrinfo', Mock(return_value=[(0, 0, 0, 0, ('1.9.8.4', 1984))]))
     @patch('builtins.open', MagicMock())
     @patch('socket.gethostname', Mock(return_value='testhost'))
     @patch('os.makedirs')
@@ -290,10 +289,14 @@ class TestPatroni(unittest.TestCase):
                 self.assertIn('Failed to establish PostgreSQL connection', e.exception.code)
 
                 # 3.8 Failed to get local IP
-                with patch('socket.socket.connect', Mock(side_effect=OSError)),\
-                     self.assertRaises(SystemExit) as e:
-                    patroni_main()
-                self.assertIn('Failed to define local ip', e.exception.code)
+                with patch('socket.getaddrinfo', Mock(side_effect=[OSError, []])):
+                    with self.assertRaises(SystemExit) as e:
+                        patroni_main()
+                    self.assertIn('Failed to define ip address', e.exception.code)
+                    with self.assertRaises(SystemExit) as e:
+                        patroni_main()
+                    self.assertIn('Failed to define ip address. No address returned by getaddrinfo for',
+                                  e.exception.code)
 
     @patch('pkgutil.iter_importers', Mock(return_value=[MockFrozenImporter()]))
     @patch('sys.frozen', Mock(return_value=True), create=True)
