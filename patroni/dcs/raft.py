@@ -10,7 +10,7 @@ from pysyncobj.dns_resolver import globalDnsResolver
 from pysyncobj.node import TCPNode
 from pysyncobj.transport import TCPTransport, CONNECTION_STATE
 from pysyncobj.utility import TcpUtility
-from typing import Any, Callable, Collection, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, Collection, Dict, List, Optional, Set, Union, TYPE_CHECKING
 
 from . import AbstractDCS, ClusterConfig, Cluster, Failover, Leader, Member, SyncState, TimelineHistory, citus_group_re
 from ..exceptions import DCSError
@@ -114,7 +114,7 @@ class KVStoreTTL(DynMemberSyncObj):
         self.set_retry_timeout(int(config.get('retry_timeout') or 10))
 
         self_addr = config.get('self_addr')
-        partner_addrs = set(config.get('partner_addrs', []))
+        partner_addrs: Set[str] = set(config.get('partner_addrs', []))
         if config.get('patronictl'):
             if self_addr:
                 partner_addrs.add(self_addr)
@@ -419,7 +419,7 @@ class Raft(AbstractDCS):
     def _write_failsafe(self, value: str) -> bool:
         return self._sync_obj.set(self.failsafe_path, value, timeout=1) is not False
 
-    def _update_leader(self) -> bool:
+    def _update_leader(self, leader: Leader) -> bool:
         ret = self._sync_obj.set(self.leader_path, self._name, ttl=self._ttl,
                                  handle_raft_error=False, prevValue=self._name) is not False
         if not ret and self._sync_obj.get(self.leader_path) is None:

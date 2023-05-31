@@ -18,7 +18,7 @@ from patroni.exceptions import DCSError
 from patroni.postgresql import Postgresql
 from patroni.postgresql.config import ConfigHandler
 from patroni import check_psycopg
-from patroni.__main__ import Patroni, main as _main, patroni_main
+from patroni.__main__ import Patroni, main as _main
 from threading import Thread
 
 from . import psycopg_connect, SleepException
