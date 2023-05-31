@@ -6,16 +6,14 @@ This module contains facilities for validating configuration of Patroni processe
 :var schema: configuration schema of the daemon launched by `patroni` command.
 """
 import os
-import re
 import shutil
 import socket
-import subprocess
 
-from typing import Any, Dict, Union, Iterator, List, Optional as OptionalType, TYPE_CHECKING
+from typing import Any, Dict, Union, Iterator, List, Optional as OptionalType
 
-from .utils import parse_int, split_host_port, data_directory_is_empty
+from .utils import parse_int, split_host_port, data_directory_is_empty, get_major_version
 from .dcs import dcs_modules
-from .exceptions import ConfigParseError, PatroniException
+from .exceptions import ConfigParseError
 
 
 def data_directory_empty(data_dir: str) -> bool:
@@ -186,35 +184,6 @@ def get_bin_name(bin_name: str) -> str:
     return (schema.data.get('postgresql', {}).get('bin_name', {}) or {}).get(bin_name, bin_name)
 
 
-def get_major_version(bin_dir: OptionalType[str] = None) -> str:
-    """Get the major version of PostgreSQL.
-
-    It is based on the output of ``postgres --version``.
-
-    :param bin_dir: path to PostgreSQL binaries directory. If ``None`` it will use the first ``postgres`` binary that
-        is found by subprocess in the ``PATH``.
-    :returns: the PostgreSQL major version.
-    :raises :class:`patroni.exceptions.PatroniException`: if the postgres binary call failed due to OSError
-
-    :Example:
-
-        * Returns `9.6` for PostgreSQL 9.6.24
-        * Returns `15` for PostgreSQL 15.2
-    """
-    if not bin_dir:
-        binary = get_bin_name('postgres')
-    else:
-        binary = os.path.join(bin_dir, get_bin_name('postgres'))
-    try:
-        version = subprocess.check_output([binary, '--version']).decode()
-    except OSError as e:
-        raise PatroniException(f'Failed to get postgres version: {e}')
-    version = re.match(r'^[^\s]+ [^\s]+ (\d+)(\.(\d+))?', version)
-    if TYPE_CHECKING:  # pragma: no cover
-        assert version is not None
-    return '.'.join([version.group(1), version.group(3)]) if int(version.group(1)) < 10 else version.group(1)
-
-
 def validate_data_dir(data_dir: str) -> bool:
     """Validate the value of ``postgresql.data_dir`` configuration option.
 
@@ -249,7 +218,7 @@ def validate_data_dir(data_dir: str) -> bool:
                 raise ConfigParseError("data dir for the cluster is not empty, but doesn't contain"
                                        " \"{}\" directory".format(waldir))
             bin_dir = schema.data.get("postgresql", {}).get("bin_dir", None)
-            major_version = get_major_version(bin_dir)
+            major_version = get_major_version(bin_dir, get_bin_name('postgres'))
             if pgversion != major_version:
                 raise ConfigParseError("data_dir directory postgresql version ({}) doesn't match with "
                                        "'postgres --version' output ({})".format(pgversion, major_version))

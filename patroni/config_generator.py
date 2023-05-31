@@ -189,7 +189,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
     :param dsn: Optional DSN string for the local instance to get GUC values from.
     """
     from patroni.config import Config
-    from patroni.validator import get_major_version
+    from patroni.utils import get_major_version
 
     no_value_msg = '#FIXME'
     pg_version = None
