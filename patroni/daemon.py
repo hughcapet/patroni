@@ -12,12 +12,18 @@ import signal
 import sys
 
 from threading import Lock
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, TYPE_CHECKING
 
-from .config import Config
+if TYPE_CHECKING:  # pragma: no cover
+    from .config import Config
 
 
 def get_base_arg_parser() -> argparse.ArgumentParser:
+    """Create a basic argument parser with the arguments used for both patroni and raft controller daemon.
+
+    :returns: 'argparse.ArgumentParser' object
+    """
+    from .config import Config
     from .version import __version__
 
     parser = argparse.ArgumentParser()
@@ -154,11 +160,8 @@ class AbstractPatroniDaemon(abc.ABC):
 def abstract_main(cls: Type[AbstractPatroniDaemon], configfile: str) -> None:
     """Create the main entry point of a given daemon process.
 
-    Expose a basic argument parser, parse the command-line arguments, and run the given daemon process.
-
     :param cls: a class that should inherit from :class:`AbstractPatroniDaemon`.
-    :param validator: used to validate the daemon configuration schema, if requested by the user through
-        ``--validate-config`` CLI option.
+    :param configfile:
     """
     from .config import Config, ConfigParseError
     try:

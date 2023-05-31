@@ -4,12 +4,14 @@ import signal
 import sys
 import time
 
-from typing import Any, Dict, Optional
+from argparse import Namespace
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from patroni.daemon import AbstractPatroniDaemon, abstract_main
 from patroni.config_generator import generate_config
+from patroni.daemon import AbstractPatroniDaemon, abstract_main, get_base_arg_parser
 
-from .config import Config
+if TYPE_CHECKING:  # pragma: no cover
+    from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +136,14 @@ class Patroni(AbstractPatroniDaemon):
             logger.exception('Exception during Ha.shutdown')
 
 
-def patroni_main() -> None:
+def patroni_main(configfile: str) -> None:
     from multiprocessing import freeze_support
-    freeze_support()
 
-    from .daemon import get_base_arg_parser
+    freeze_support()
+    abstract_main(Patroni, configfile)
+
+
+def process_arguments() -> Namespace:
     parser = get_base_arg_parser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--validate-config', action='store_true', help='Run config validator and exit')
@@ -158,7 +163,7 @@ def patroni_main() -> None:
         sys.exit(0)
     elif args.validate_config:
         from patroni.validator import schema
-        from patroni.config import ConfigParseError
+        from patroni.config import Config, ConfigParseError
 
         try:
             Config(args.configfile, validator=schema)
@@ -166,16 +171,18 @@ def patroni_main() -> None:
         except ConfigParseError as e:
             sys.exit(e.value)
 
-    abstract_main(Patroni, args.configfile)
+    return args
 
 
 def main() -> None:
     from patroni import check_psycopg
 
+    args = process_arguments()
+
     check_psycopg()
 
     if os.getpid() != 1:
-        return patroni_main()
+        return patroni_main(args.configfile)
 
     # Patroni started with PID=1, it looks like we are in the container
     from types import FrameType
@@ -208,7 +215,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, passtochild)
 
     import multiprocessing
-    patroni = multiprocessing.Process(target=patroni_main)
+    patroni = multiprocessing.Process(target=patroni_main, args=(args.configfile,))
     patroni.start()
     pid = patroni.pid
     patroni.join()
