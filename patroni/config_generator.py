@@ -224,7 +224,9 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
     # obtain version from the binary
     try:
-        pg_version = postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None))
+        postgres_bin = os.getenv('PATRONI_POSTGRESQL_BIN_POSTGRES', 'postgres')
+        pg_version = postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None,
+                                                                     postgres_bin))
     except PatroniException as e:
         sys.exit(str(e))
 

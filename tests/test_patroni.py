@@ -83,6 +83,7 @@ class TestPatroni(unittest.TestCase):
         os.environ['PGPASSWORD'] = 'pguser_pwd_from_env'
         os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'] = 'localhost:8080'
         os.environ['PATRONI_RESTAPI_LISTEN'] = 'localhost:8080'
+        os.environ['PATRONI_POSTGRESQL_BIN_POSTGRES'] = 'custom_postgres_bin_from_env'
 
         # 1. Wrong input
         # 1.1 Wrong DSN format
@@ -136,11 +137,14 @@ class TestPatroni(unittest.TestCase):
         # Version-specific params
         # 2.1 pg_version < 13, with dir creation
         with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
-             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")),\
+             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")) as pg_bin_mock,\
              self.assertRaises(SystemExit) as e:
             _main()
         self.assertEqual(e.exception.code, 0)
         self.assertEqual(config, mock_config_dump.call_args[0][0])
+        pg_bin_mock.assert_called_once_with([os.path.join(os.environ['PATRONI_POSTGRESQL_BIN_DIR'],
+                                                          os.environ['PATRONI_POSTGRESQL_BIN_POSTGRES']),
+                                             '--version'])
         mock_makedir.assert_called_once()
 
         mock_makedir.reset_mock()
