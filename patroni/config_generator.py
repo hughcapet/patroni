@@ -127,13 +127,13 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     if config['postgresql']['parameters']['hba_file'] == default_hba_path:
         try:
             with open(default_hba_path, 'r') as f:
-                config['postgresql']['pg_hba'] = [i.strip() for i in f.readlines()
-                                                  if i.startswith(('local',
-                                                                   'host',
-                                                                   'hostssl',
-                                                                   'hostnossl',
-                                                                   'hostgssenc',
-                                                                   'hostnogssenc'))]
+                config['postgresql']['pg_hba'] = list(filter(lambda i: i and i.split()[0] in ('local',
+                                                                                              'host',
+                                                                                              'hostssl',
+                                                                                              'hostnossl',
+                                                                                              'hostgssenc',
+                                                                                              'hostnogssenc'),
+                                                             (li.strip() for li in f.readlines())))
         except OSError as e:
             sys.exit(f'Failed to read pg_hba.conf: {e}')
 

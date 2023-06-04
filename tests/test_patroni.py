@@ -198,7 +198,11 @@ class TestPatroni(unittest.TestCase):
         del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
         del config['postgresql']['authentication']['rewind']
 
-        hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5'])
+        hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5',
+                                                                  '  host all all all md5',
+                                                                  '',
+                                                                  'hostall all all md5'])
+        config['postgresql']['pg_hba'] += ['host all all all md5']
         ident_content = '\n'.join(['# something very interesting', '  '])
         open_res = []
         for _ in range(3):
