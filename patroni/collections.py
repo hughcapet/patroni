@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Any, Collection, Dict, Iterator, MutableMapping, MutableSet, Optional
+from typing import Any, Collection, Dict, Iterator, KeysView, MutableMapping, MutableSet, Optional
 
 
 class CaseInsensitiveSet(MutableSet[str]):
@@ -68,6 +68,9 @@ class CaseInsensitiveDict(MutableMapping[str, Any]):
 
     def copy(self) -> 'CaseInsensitiveDict':
         return CaseInsensitiveDict({v[0]: v[1] for v in self._values.values()})
+
+    def keys(self) -> KeysView[str]:
+        return self._values.keys()
 
     def __repr__(self) -> str:
         return '<{0}{1} at {2:x}>'.format(type(self).__name__, dict(self.items()), id(self))

@@ -6,6 +6,7 @@ import yaml
 from typing import Any, Dict, Optional
 
 from .exceptions import PatroniException
+from .postgresql.config import ConfigHandler
 from .postgresql.misc import postgres_major_version_to_int
 
 
@@ -82,27 +83,21 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
         if cur.rowcount < 1:
             sys.exit('The provided user does not have superuser privilege')
 
+        required_params = ['hba_file', 'ident_file', 'config_file',
+                           'data_directory'] + list(ConfigHandler.CMDLINE_OPTIONS.keys())
         cur.execute("SELECT name, current_setting(name) FROM pg_settings \
                      WHERE context <> 'internal' \
                      AND source IN ('configuration file', 'command line', 'environment variable') \
                      AND category <> 'Write-Ahead Log / Recovery Target' \
                      AND setting <> '(disabled)' \
-                     OR name IN ('hba_file', 'ident_file', 'config_file', \
-                                 'data_directory', \
-                                 'listen_addresses', 'port', \
-                                 'max_connections', 'max_worker_processes', 'max_wal_senders', \
-                                 'max_replication_slots', 'max_locks_per_transaction', 'max_prepared_transactions', \
-                                 'hot_standby', \
-                                 'wal_level', 'wal_log_hints', \
-                                 'wal_keep_segments', 'wal_keep_size', \
-                                 'track_commit_timestamp');")
+                     OR name = ANY(%s);", (required_params,))
 
         helper_dict = dict.fromkeys(['port', 'listen_addresses'])
         # adjust values
         for p, v in cur.fetchall():
             if p == 'data_directory':
                 config['postgresql']['data_dir'] = v
-            elif p == 'cluster_name':
+            elif p == 'cluster_name' and v:
                 config['scope'] = v
             elif p in ('archive_command', 'restore_command', 'archive_cleanup_command',
                        'recovery_end_command', 'ssl_passphrase_command',
@@ -111,7 +106,7 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
                 # write hba/ident/config_file to local config to ensure they are not removed later
                 config['postgresql'].setdefault('parameters', {})
                 config['postgresql']['parameters'][p] = v
-            elif p in ('port', 'listen_addresses'):
+            elif p in helper_dict:
                 helper_dict[p] = v
             else:
                 config['bootstrap']['dcs']['postgresql']['parameters'][p] = v
@@ -205,12 +200,12 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
         },
         'postgresql': {
             'data_dir': no_value_msg,
-            'connect_address': no_value_msg,
-            'listen': no_value_msg,
+            'connect_address': no_value_msg + ':5432',
+            'listen': no_value_msg + ':5432',
         },
         'restapi': {
-            'connect_address': os.getenv('PATRONI_RESTAPI_CONNECT_ADDRESS', f'{local_ip}:8008'),
-            'listen': os.getenv('PATRONI_RESTAPI_LISTEN') or f'{local_ip}:8008'
+            'connect_address': os.getenv('PATRONI_RESTAPI_CONNECT_ADDRESS', local_ip + ':8008'),
+            'listen': os.getenv('PATRONI_RESTAPI_LISTEN') or local_ip + ':8008'
         }
     }
 
@@ -254,7 +249,6 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
         # add version-specific configuration
         if pg_version:
-            from patroni.postgresql.config import ConfigHandler
             wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
             config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
                 ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]

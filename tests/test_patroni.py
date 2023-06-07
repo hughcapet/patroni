@@ -114,9 +114,9 @@ class TestPatroni(unittest.TestCase):
                 'dcs': dynamic_config
             },
             'postgresql': {
-                'connect_address': no_value_msg,
+                'connect_address': no_value_msg + ':5432',
                 'data_dir': no_value_msg,
-                'listen': no_value_msg,
+                'listen': no_value_msg + ':5432',
                 'pg_hba': ['host all all all md5',
                            f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all md5'],
                 'authentication': {'superuser': {'username': os.environ['PATRONI_SUPERUSER_USERNAME'],
