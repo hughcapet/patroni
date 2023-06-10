@@ -6,6 +6,8 @@ import signal
 import time
 import unittest
 
+from copy import deepcopy
+
 from . import MockCursor
 import patroni.config as config
 from http.server import HTTPServer
@@ -63,248 +65,6 @@ class TestPatroni(unittest.TestCase):
         self.assertRaises(SystemExit, _main)
         with patch.object(config.Config, '__init__', Mock(return_value=None)):
             self.assertRaises(SystemExit, _main)
-
-    @patch('patroni.psycopg.connect', psycopg_connect)
-    @patch('socket.getaddrinfo', Mock(return_value=[(0, 0, 0, 0, ('1.9.8.4', 1984))]))
-    @patch('builtins.open', MagicMock())
-    @patch('socket.gethostname', Mock(return_value='testhost'))
-    @patch('os.makedirs')
-    @patch('yaml.safe_dump')
-    def test_generate_sample_config(self, mock_config_dump, mock_makedir):
-        self.maxDiff = None
-        os.environ['PATRONI_SCOPE'] = 'scope_from_env'
-        os.environ['PATRONI_POSTGRESQL_BIN_DIR'] = '/bin/from/env'
-        os.environ['PATRONI_SUPERUSER_USERNAME'] = 'su_user_from_env'
-        os.environ['PATRONI_SUPERUSER_PASSWORD'] = 'su_pwd_from_env'
-        os.environ['PATRONI_REPLICATION_USERNAME'] = 'repl_user_from_env'
-        os.environ['PATRONI_REPLICATION_PASSWORD'] = 'repl_pwd_from_env'
-        os.environ['PATRONI_REWIND_USERNAME'] = 'rewind_user_from_env'
-        os.environ['PGUSER'] = 'pguser_from_env'
-        os.environ['PGPASSWORD'] = 'pguser_pwd_from_env'
-        os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'] = 'localhost:8080'
-        os.environ['PATRONI_RESTAPI_LISTEN'] = 'localhost:8080'
-        os.environ['PATRONI_POSTGRESQL_BIN_POSTGRES'] = 'custom_postgres_bin_from_env'
-
-        # 1. Wrong input
-        # 1.1 Wrong DSN format
-        with patch('sys.argv', ['patroni.py', '--generate-config', '--dsn', 'host:foo port:bar user:foobar']),\
-             self.assertRaises(SystemExit) as e:
-            _main()
-        self.assertIn('Failed to parse DSN string', e.exception.code)
-
-        # 1.2 User is not a superuser
-        with patch('sys.argv', ['patroni.py',
-                                '--generate-config', '--dsn', 'host=foo port=bar user=foobar password=pwd_from_dsn']),\
-             patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True),\
-             self.assertRaises(SystemExit) as e:
-            _main()
-        self.assertIn('The provided user does not have superuser privilege', e.exception.code)
-
-        no_value_msg = '#FIXME'
-        dynamic_config = Config.get_default_config()
-        dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-        del dynamic_config['standby_cluster']
-        dynamic_config['postgresql']['parameters']['wal_keep_segments'] = 8
-        dynamic_config['postgresql']['use_pg_rewind'] = True
-
-        config = {
-            'scope': os.environ['PATRONI_SCOPE'],
-            'name': 'testhost',
-            'bootstrap': {
-                'dcs': dynamic_config
-            },
-            'postgresql': {
-                'connect_address': no_value_msg + ':5432',
-                'data_dir': no_value_msg,
-                'listen': no_value_msg + ':5432',
-                'pg_hba': ['host all all all md5',
-                           f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all md5'],
-                'authentication': {'superuser': {'username': os.environ['PATRONI_SUPERUSER_USERNAME'],
-                                                 'password': os.environ['PATRONI_SUPERUSER_PASSWORD']},
-                                   'replication': {'username': os.environ["PATRONI_REPLICATION_USERNAME"],
-                                                   'password': os.environ['PATRONI_REPLICATION_PASSWORD']}},
-                'bin_dir': os.environ['PATRONI_POSTGRESQL_BIN_DIR'],
-                'parameters': {'password_encryption': 'md5'}
-            },
-            'restapi': {
-                'connect_address': os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'],
-                'listen': os.environ['PATRONI_RESTAPI_LISTEN']
-            }
-        }
-
-        # 2. Sample config
-
-        # Version-specific params
-        # 2.1 pg_version < 13, with dir creation
-        with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
-             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")) as pg_bin_mock,\
-             self.assertRaises(SystemExit) as e:
-            _main()
-        self.assertEqual(e.exception.code, 0)
-        self.assertEqual(config, mock_config_dump.call_args[0][0])
-        pg_bin_mock.assert_called_once_with([os.path.join(os.environ['PATRONI_POSTGRESQL_BIN_DIR'],
-                                                          os.environ['PATRONI_POSTGRESQL_BIN_POSTGRES']),
-                                             '--version'])
-        mock_makedir.assert_called_once()
-
-        mock_makedir.reset_mock()
-        mock_config_dump.reset_mock()
-
-        # 2.2 pg_version >= 13
-        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
-        config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
-        config['postgresql']['authentication']['rewind'] = {'username': os.environ['PATRONI_REWIND_USERNAME'],
-                                                            'password': no_value_msg}
-        config['postgresql']['parameters']['password_encryption'] = 'scram-sha-256'
-        config['postgresql']['pg_hba'] = \
-            ['host all all all scram-sha-256',
-             f'host replication {os.environ["PATRONI_REPLICATION_USERNAME"]} all scram-sha-256']
-        with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
-             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")),\
-             self.assertRaises(SystemExit) as e:
-            _main()
-        self.assertEqual(e.exception.code, 0)
-        self.assertEqual(config, mock_config_dump.call_args[0][0])
-
-        mock_config_dump.reset_mock()
-
-        # 3. Config for a running PG13+ instance
-        del config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size']
-
-        # values are taken from tests/__init__.py
-        config['scope'] = 'my_cluster'  # cluster_name
-        config['postgresql']['connect_address'] = '1.9.8.4:bar'
-        config['postgresql']['listen'] = '6.6.6.6:1984'
-        config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
-        config['postgresql']['parameters']['hba_file'] = os.path.join('data', 'pg_hba.conf')
-        config['postgresql']['parameters']['ident_file'] = os.path.join('data', 'pg_ident.conf')
-        config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
-        config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
-        config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
-        config['bootstrap']['dcs']['postgresql']['parameters']['max_wal_senders'] = 37
-        config['bootstrap']['dcs']['postgresql']['parameters']['wal_level'] = 'replica'
-        config['postgresql']['data_dir'] = 'data'
-        config['postgresql']['bin_dir'] = '/bin/dir/from/running'
-        config['postgresql']['authentication']['superuser'] = {
-            'username': 'foobar',
-            'password': 'qwerty',
-            'channel_binding': 'prefer',
-            'gssencmode': 'prefer',
-            'sslmode': 'prefer'
-        }
-        config['postgresql']['authentication']['replication'] = {'username': no_value_msg, 'password': no_value_msg}
-
-        # Rewind is not configured for a running instance config
-        del config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
-        del config['postgresql']['authentication']['rewind']
-
-        hba_content = '\n'.join(config['postgresql']['pg_hba'] + ['#host all all all md5',
-                                                                  '  host all all all md5',
-                                                                  '',
-                                                                  'hostall all all md5'])
-        config['postgresql']['pg_hba'] += ['host all all all md5']
-        ident_content = '\n'.join(['# something very interesting', '  '])
-        open_res = []
-        for _ in range(3):
-            open_res.extend([
-                mock_open(read_data=hba_content)(),
-                mock_open(read_data=ident_content)(),
-                mock_open(read_data='1984')(),
-                mock_open()()
-            ])
-
-        with patch('psutil.Process.__init__', Mock(return_value=None)),\
-             patch('psutil.Process.exe', Mock(return_value='/bin/dir/from/running/postgres')),\
-             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 15.2")),\
-             patch('builtins.open', Mock(side_effect=open_res)):
-
-            # 3.1.1 pg_version >= 13
-            with patch('sys.argv', ['patroni.py', '--generate-config',
-                                    '--dsn', 'host=foo port=bar user=foobar password=qwerty']),\
-                 self.assertRaises(SystemExit) as e:
-                _main()
-            self.assertEqual(e.exception.code, 0)
-            self.assertEqual(config, mock_config_dump.call_args[0][0])
-
-            mock_config_dump.reset_mock()
-
-            # 3.1.2 su auth params and connect host from env
-            os.environ['PGCHANNELBINDING'] =\
-                config['postgresql']['authentication']['superuser']['channel_binding'] = 'disable'
-            del config['postgresql']['authentication']['superuser']['gssencmode']
-            del config['postgresql']['authentication']['superuser']['sslmode']
-            config['postgresql']['authentication']['superuser']['username'] = os.environ['PGUSER']
-            config['postgresql']['authentication']['superuser']['password'] = os.environ['PGPASSWORD']
-            config['postgresql']['connect_address'] = '1.9.8.4:1984'
-
-            with patch('sys.argv', ['patroni.py', '--generate-config']):
-
-                with self.assertRaises(SystemExit) as e:
-                    _main()
-
-                self.assertEqual(config, mock_config_dump.call_args[0][0])
-
-                mock_config_dump.reset_mock()
-
-                # 3.1.5 Error while calling postgres --version
-                with patch('subprocess.check_output', Mock(side_effect=OSError)),\
-                     self.assertRaises(SystemExit) as e:
-                    _main()
-                self.assertIn('Failed to get postgres version:', e.exception.code)
-
-                with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(),
-                                                              mock_open(read_data=ident_content)(),
-                                                              mock_open(read_data='')(),  # 3.2 empty postmaster.pid
-                                                              mock_open(read_data=hba_content)(),
-                                                              mock_open(read_data=ident_content)(),
-                                                              OSError,  # 3.3 Failed to open postmaster.pid
-                                                              mock_open(read_data=hba_content)(),
-                                                              mock_open(read_data=ident_content)(),
-                                                              # 3.4 Invalid postmaster pid
-                                                              mock_open(read_data='1984')()
-                                                              ])):
-                    with self.assertRaises(SystemExit) as e:
-                        _main()
-                    self.assertIn('Failed to obtain postmaster pid from postmaster.pid file', e.exception.code)
-
-                    with self.assertRaises(SystemExit) as e:
-                        _main()
-                    self.assertIn('Error while reading postmaster.pid file', e.exception.code)
-
-                    with patch('psutil.Process.__init__', Mock(return_value=None)),\
-                         patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))),\
-                         self.assertRaises(SystemExit) as e:
-                        _main()
-                    self.assertIn("Obtained postmaster pid doesn't exist", e.exception.code)
-
-                # 3.5 Failed to open pg_hba
-                with patch('builtins.open', Mock(side_effect=OSError)),\
-                     self.assertRaises(SystemExit) as e:
-                    _main()
-                self.assertIn('Failed to read pg_hba.conf', e.exception.code)
-
-                # 3.6 Failed to open pg_ident
-                with patch('builtins.open', Mock(side_effect=[mock_open(read_data=hba_content)(), OSError])),\
-                     self.assertRaises(SystemExit) as e:
-                    _main()
-                self.assertIn('Failed to read pg_ident.conf', e.exception.code)
-
-                # 3.7 Failed PG connecttion
-                from . import psycopg
-                with patch('patroni.psycopg.connect', side_effect=psycopg.Error),\
-                     self.assertRaises(SystemExit) as e:
-                    _main()
-                self.assertIn('Failed to establish PostgreSQL connection', e.exception.code)
-
-                # 3.8 Failed to get local IP
-                with patch('socket.getaddrinfo', Mock(side_effect=[OSError, []])):
-                    with self.assertRaises(SystemExit) as e:
-                        _main()
-                    self.assertIn('Failed to define ip address', e.exception.code)
-                    with self.assertRaises(SystemExit) as e:
-                        _main()
-                    self.assertIn('Failed to define ip address. No address returned by getaddrinfo for',
-                                  e.exception.code)
 
     @patch('pkgutil.iter_importers', Mock(return_value=[MockFrozenImporter()]))
     @patch('sys.frozen', Mock(return_value=True), create=True)
@@ -447,3 +207,257 @@ class TestPatroni(unittest.TestCase):
             self.assertRaises(SystemExit, check_psycopg)
         with patch('builtins.__import__', mock_import):
             self.assertRaises(SystemExit, check_psycopg)
+
+
+@patch('patroni.psycopg.connect', psycopg_connect)
+@patch('socket.getaddrinfo', Mock(return_value=[(0, 0, 0, 0, ('1.9.8.4', 1984))]))
+@patch('builtins.open', MagicMock())
+@patch('socket.gethostname', Mock(return_value='testhost'))
+@patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 13.2"))
+@patch('psutil.Process.exe', Mock(return_value='/bin/dir/from/running/postgres'))
+@patch('psutil.Process.__init__', Mock(return_value=None))
+class TestGenerateConfig(unittest.TestCase):
+
+    no_value_msg = '#FIXME'
+
+    def setUp(self):
+        self.maxDiff = None
+
+        os.environ['PATRONI_SCOPE'] = 'scope_from_env'
+        os.environ['PATRONI_POSTGRESQL_BIN_DIR'] = '/bin/from/env'
+        os.environ['PATRONI_SUPERUSER_USERNAME'] = 'su_user_from_env'
+        os.environ['PATRONI_SUPERUSER_PASSWORD'] = 'su_pwd_from_env'
+        os.environ['PATRONI_REPLICATION_USERNAME'] = 'repl_user_from_env'
+        os.environ['PATRONI_REPLICATION_PASSWORD'] = 'repl_pwd_from_env'
+        os.environ['PATRONI_REWIND_USERNAME'] = 'rewind_user_from_env'
+        os.environ['PGUSER'] = 'pguser_from_env'
+        os.environ['PGPASSWORD'] = 'pguser_pwd_from_env'
+        os.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'] = 'localhost:8080'
+        os.environ['PATRONI_RESTAPI_LISTEN'] = 'localhost:8080'
+        os.environ['PATRONI_POSTGRESQL_BIN_POSTGRES'] = 'custom_postgres_bin_from_env'
+
+        self.environ = deepcopy(os.environ)
+
+        dynamic_config = Config.get_default_config()
+        dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
+        del dynamic_config['standby_cluster']
+        dynamic_config['postgresql']['parameters']['wal_keep_segments'] = 8
+        dynamic_config['postgresql']['use_pg_rewind'] = True
+
+        self.config = {
+            'scope': self.environ['PATRONI_SCOPE'],
+            'name': 'testhost',
+            'bootstrap': {
+                'dcs': dynamic_config
+            },
+            'postgresql': {
+                'connect_address': self.no_value_msg + ':5432',
+                'data_dir': self.no_value_msg,
+                'listen': self.no_value_msg + ':5432',
+                'pg_hba': ['host all all all md5',
+                           f'host replication {self.environ["PATRONI_REPLICATION_USERNAME"]} all md5'],
+                'authentication': {'superuser': {'username': self.environ['PATRONI_SUPERUSER_USERNAME'],
+                                                 'password': self.environ['PATRONI_SUPERUSER_PASSWORD']},
+                                   'replication': {'username': self.environ['PATRONI_REPLICATION_USERNAME'],
+                                                   'password': self.environ['PATRONI_REPLICATION_PASSWORD']},
+                                   'rewind': {'username': self.environ['PATRONI_REWIND_USERNAME']}},
+                'bin_dir': self.environ['PATRONI_POSTGRESQL_BIN_DIR'],
+                'bin_name': {'postgres': self.environ['PATRONI_POSTGRESQL_BIN_POSTGRES']},
+                'parameters': {'password_encryption': 'md5'}
+            },
+            'restapi': {
+                'connect_address': self.environ['PATRONI_RESTAPI_CONNECT_ADDRESS'],
+                'listen': self.environ['PATRONI_RESTAPI_LISTEN']
+            }
+        }
+
+    def _set_running_instance_config_vals(self):
+        # values are taken from tests/__init__.py
+        self.config['scope'] = 'my_cluster'  # cluster_name
+        self.config['postgresql']['connect_address'] = '1.9.8.4:bar'
+        self.config['postgresql']['listen'] = '6.6.6.6:1984'
+        self.config['postgresql']['data_dir'] = 'data'
+        self.config['postgresql']['bin_dir'] = '/bin/dir/from/running'
+
+        self.config['postgresql']['parameters'] = {'archive_command': 'my archive command'}
+        self.config['postgresql']['parameters']['hba_file'] = os.path.join('data', 'pg_hba.conf')
+        self.config['postgresql']['parameters']['ident_file'] = os.path.join('data', 'pg_ident.conf')
+
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['max_connections'] = 42
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['max_locks_per_transaction'] = 73
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['max_replication_slots'] = 21
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['max_wal_senders'] = 37
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['wal_level'] = 'replica'
+        del self.config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+
+        self.config['postgresql']['authentication']['superuser'] = {
+            'username': 'foobar',
+            'password': 'qwerty',
+            'channel_binding': 'prefer',
+            'gssencmode': 'prefer',
+            'sslmode': 'prefer'
+        }
+        self.config['postgresql']['authentication']['replication'] = {'username': self.no_value_msg,
+                                                                      'password': self.no_value_msg}
+
+        # Rewind is not configured for a running instance config
+        del self.config['bootstrap']['dcs']['postgresql']['use_pg_rewind']
+        del self.config['postgresql']['authentication']['rewind']
+
+    def _get_running_instance_open_res(self):
+        hba_content = '\n'.join(self.config['postgresql']['pg_hba'] + ['#host all all all md5',
+                                                                       '  host all all all md5',
+                                                                       '',
+                                                                       'hostall all all md5'])
+        ident_content = '\n'.join(['# something very interesting', '  '])
+
+        self.config['postgresql']['pg_hba'] += ['host all all all md5']
+        return [
+            mock_open(read_data=hba_content)(),
+            mock_open(read_data=ident_content)(),
+            mock_open(read_data='1984')(),
+            mock_open()()
+        ]
+
+    @patch('os.makedirs')
+    @patch('yaml.safe_dump')
+    def test_generate_sample_config_pre_13_dir_creation(self, mock_config_dump, mock_makedir):
+        with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
+             patch('subprocess.check_output', Mock(return_value=b"postgres (PostgreSQL) 9.4.3")) as pg_bin_mock,\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertEqual(e.exception.code, 0)
+        self.assertEqual(self.config, mock_config_dump.call_args[0][0])
+        mock_makedir.assert_called_once()
+        pg_bin_mock.assert_called_once_with([os.path.join(self.environ['PATRONI_POSTGRESQL_BIN_DIR'],
+                                                          self.environ['PATRONI_POSTGRESQL_BIN_POSTGRES']),
+                                             '--version'])
+
+    @patch('os.makedirs', Mock())
+    @patch('yaml.safe_dump')
+    def test_generate_sample_config_13(self, mock_config_dump):
+        del self.config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_segments']
+        self.config['bootstrap']['dcs']['postgresql']['parameters']['wal_keep_size'] = '128MB'
+        self.config['postgresql']['authentication']['rewind'] = {'username': self.environ['PATRONI_REWIND_USERNAME'],
+                                                                 'password': self.no_value_msg}
+        self.config['postgresql']['parameters']['password_encryption'] = 'scram-sha-256'
+        self.config['postgresql']['pg_hba'] = \
+            ['host all all all scram-sha-256',
+             f'host replication {self.environ["PATRONI_REPLICATION_USERNAME"]} all scram-sha-256']
+
+        with patch('sys.argv', ['patroni.py', '--generate-sample-config', '/foo/bar.yml']),\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertEqual(e.exception.code, 0)
+        self.assertEqual(self.config, mock_config_dump.call_args[0][0])
+
+    @patch('os.makedirs', Mock())
+    @patch('yaml.safe_dump')
+    def test_generate_config_running_instance_13(self, mock_config_dump):
+        self._set_running_instance_config_vals()
+
+        with patch('builtins.open', Mock(side_effect=self._get_running_instance_open_res())),\
+             patch('sys.argv', ['patroni.py', '--generate-config',
+                                '--dsn', 'host=foo port=bar user=foobar password=qwerty']),\
+                self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertEqual(e.exception.code, 0)
+        self.assertEqual(self.config, mock_config_dump.call_args[0][0])
+
+    @patch('os.makedirs', Mock())
+    @patch('yaml.safe_dump')
+    def test_generate_config_running_instance_13_connect_from_env(self, mock_config_dump):
+        self._set_running_instance_config_vals()
+        # su auth params and connect host from env
+        os.environ['PGCHANNELBINDING'] =\
+            self.config['postgresql']['authentication']['superuser']['channel_binding'] = 'disable'
+        del self.config['postgresql']['authentication']['superuser']['gssencmode']
+        del self.config['postgresql']['authentication']['superuser']['sslmode']
+        self.config['postgresql']['authentication']['superuser']['username'] = self.environ['PGUSER']
+        self.config['postgresql']['authentication']['superuser']['password'] = self.environ['PGPASSWORD']
+        self.config['postgresql']['connect_address'] = '1.9.8.4:1984'
+
+        with patch('builtins.open', Mock(side_effect=self._get_running_instance_open_res())),\
+             patch('sys.argv', ['patroni.py', '--generate-config']),\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertEqual(e.exception.code, 0)
+        self.assertEqual(self.config, mock_config_dump.call_args[0][0])
+
+    def test_generate_config_running_instance_errors(self):
+        # 1. Wrong DSN format
+        with patch('sys.argv', ['patroni.py', '--generate-config', '--dsn', 'host:foo port:bar user:foobar']),\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertIn('Failed to parse DSN string', e.exception.code)
+
+        # 2. User is not a superuser
+        with patch('sys.argv', ['patroni.py',
+                                '--generate-config', '--dsn', 'host=foo port=bar user=foobar password=pwd_from_dsn']),\
+             patch.object(MockCursor, 'rowcount', PropertyMock(return_value=0), create=True),\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertIn('The provided user does not have superuser privilege', e.exception.code)
+
+        # 3. Error while calling postgres --version
+        with patch('subprocess.check_output', Mock(side_effect=OSError)),\
+             patch('sys.argv', ['patroni.py', '--generate-config']),\
+             self.assertRaises(SystemExit) as e:
+            _main()
+        self.assertIn('Failed to get postgres version:', e.exception.code)
+
+        with patch('sys.argv', ['patroni.py', '--generate-config']):
+
+            # 4. empty postmaster.pid
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='hba_content')(),
+                                                          mock_open(read_data='ident_content')(),
+                                                          mock_open(read_data='')()])),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn('Failed to obtain postmaster pid from postmaster.pid file', e.exception.code)
+
+            # 5. Failed to open postmaster.pid
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='hba_content')(),
+                                                          mock_open(read_data='ident_content')(),
+                                                          OSError])),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn('Error while reading postmaster.pid file', e.exception.code)
+
+            # 6. Invalid postmaster pid
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='hba_content')(),
+                                                          mock_open(read_data='ident_content')(),
+                                                          mock_open(read_data='1984')()])),\
+                 patch('psutil.Process.__init__', Mock(return_value=None)),\
+                 patch('psutil.Process.exe', Mock(side_effect=psutil.NoSuchProcess(1984))),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn("Obtained postmaster pid doesn't exist", e.exception.code)
+
+            # 7. Failed to open pg_hba
+            with patch('builtins.open', Mock(side_effect=OSError)),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn('Failed to read pg_hba.conf', e.exception.code)
+
+            # 8. Failed to open pg_ident
+            with patch('builtins.open', Mock(side_effect=[mock_open(read_data='hba_content')(), OSError])),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn('Failed to read pg_ident.conf', e.exception.code)
+
+            # 9. Failed PG connecttion
+            from . import psycopg
+            with patch('patroni.psycopg.connect', side_effect=psycopg.Error),\
+                 self.assertRaises(SystemExit) as e:
+                _main()
+            self.assertIn('Failed to establish PostgreSQL connection', e.exception.code)
+
+            # 10. Failed to get local IP
+            with patch('socket.getaddrinfo', Mock(side_effect=[OSError, []])):
+                with self.assertRaises(SystemExit) as e:
+                    _main()
+                self.assertIn('Failed to define ip address', e.exception.code)
+                with self.assertRaises(SystemExit) as e:
+                    _main()
+                self.assertIn('Failed to define ip address. No address returned by getaddrinfo for', e.exception.code)

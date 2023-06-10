@@ -247,6 +247,10 @@ class Config(object):
     def dynamic_configuration(self) -> Dict[str, Any]:
         return deepcopy(self._dynamic_configuration)
 
+    @property
+    def local_configuration(self) -> Dict[str, Any]:
+        return deepcopy(dict(self._local_configuration))
+
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         return deepcopy(cls.__DEFAULT_CONFIG)

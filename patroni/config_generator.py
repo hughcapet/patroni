@@ -192,34 +192,35 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-    config: Dict[str, Any] = {
-        'scope': os.getenv('PATRONI_SCOPE', no_value_msg),
-        'name': os.getenv('PATRONI_NAME') or socket.gethostname(),
-        'bootstrap': {
-            'dcs': dynamic_config
-        },
-        'postgresql': {
-            'data_dir': no_value_msg,
-            'connect_address': no_value_msg + ':5432',
-            'listen': no_value_msg + ':5432',
-        },
-        'restapi': {
-            'connect_address': os.getenv('PATRONI_RESTAPI_CONNECT_ADDRESS', local_ip + ':8008'),
-            'listen': os.getenv('PATRONI_RESTAPI_LISTEN') or local_ip + ':8008'
-        }
-    }
+
+    config = Config('', None).local_configuration  # Get values from env
+    config.setdefault('scope', no_value_msg)
+    config.setdefault('name', socket.gethostname())
+    config.setdefault('postgresql', {})
+    config['postgresql'].setdefault('data_dir', no_value_msg)
+    config['postgresql'].setdefault('connect_address', no_value_msg + ':5432')
+    config['postgresql'].setdefault('listen', no_value_msg + ':5432')
+    config['postgresql'].setdefault('bin_dir', '')
+    config['postgresql'].setdefault('authentication', {})
+    config['postgresql']['authentication'].setdefault(
+        'superuser', {'username': 'postgres'}).setdefault(
+            'password', no_value_msg)
+    config['postgresql']['authentication'].setdefault(
+        'replication', {'username': 'replicator'}).setdefault(
+            'password', no_value_msg)
+    config.setdefault('restapi', {})
+    config['restapi'].setdefault('connect_address', local_ip + ':8008')
+    config['restapi'].setdefault('listen', local_ip + ':8008')
+    config.setdefault('bootstrap', {})
+    config['bootstrap']['dcs'] = dynamic_config
 
     if not sample:
         enrich_config_from_running_instance(config, no_value_msg, dsn)
-
-    bin_dir = os.getenv('PATRONI_POSTGRESQL_BIN_DIR', '')
-    config['postgresql']['bin_dir'] = bin_dir
-    if not sample:
         config['postgresql']['bin_dir'] = get_bin_dir_from_running_instance(config['postgresql']['data_dir'])
 
     # obtain version from the binary
     try:
-        postgres_bin = os.getenv('PATRONI_POSTGRESQL_BIN_POSTGRES', 'postgres')
+        postgres_bin = config['postgresql'].get('bin_name', {}).get('postgres', 'postgres')
         pg_version = postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None,
                                                                      postgres_bin))
     except PatroniException as e:
@@ -227,24 +228,11 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
     # generate sample config
     if sample:
-        # some sane defaults or values set via Patroni env vars
-        replicator = os.getenv('PATRONI_REPLICATION_USERNAME', 'replicator')
-        config['postgresql']['authentication'] = {
-            'superuser': {
-                'username': os.getenv('PATRONI_SUPERUSER_USERNAME', 'postgres'),
-                'password': os.getenv('PATRONI_SUPERUSER_PASSWORD', no_value_msg)
-            },
-            'replication': {
-                'username': replicator,
-                'password': os.getenv('PATRONI_REPLICATION_PASSWORD', no_value_msg)
-            }
-        }
-
         auth_method = 'scram-sha-256' if pg_version and pg_version >= 100000 else 'md5'
         config['postgresql']['parameters'] = {'password_encryption': auth_method}
         config['postgresql']['pg_hba'] = [
             f'host all all all {auth_method}',
-            f'host replication {replicator} all {auth_method}'
+            f'host replication {config["postgresql"]["authentication"]["replication"]["username"]} all {auth_method}'
         ]
 
         # add version-specific configuration
@@ -255,10 +243,9 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
 
             config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
             if pg_version >= 110000:
-                config['postgresql']['authentication']['rewind'] = {
-                    'username': os.getenv('PATRONI_REWIND_USERNAME', 'rewind_user'),
-                    'password': no_value_msg
-                }
+                config['postgresql']['authentication'].setdefault(
+                    'rewind', {'username': 'rewind_user'}).setdefault(
+                        'password', no_value_msg)
 
     # redundant values from the default config
     del config['bootstrap']['dcs']['standby_cluster']
