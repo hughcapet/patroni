@@ -5,9 +5,11 @@ import yaml
 
 from typing import Any, Dict, Optional
 
+from .config import Config
 from .exceptions import PatroniException
 from .postgresql.config import ConfigHandler
 from .postgresql.misc import postgres_major_version_to_int
+from .utils import get_major_version, patch_config
 
 
 def get_ip() -> str:
@@ -183,36 +185,40 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
     :param sample: Optional flag. If set, no source instance will be used - generate config with some sane defaults.
     :param dsn: Optional DSN string for the local instance to get GUC values from.
     """
-    from patroni.config import Config
-    from patroni.utils import get_major_version
-
     no_value_msg = '#FIXME'
     pg_version = None
     local_ip = get_ip()
 
+    config = Config('', None).local_configuration  # Get values from env
     dynamic_config = Config.get_default_config()
     dynamic_config['postgresql']['parameters'] = dict(dynamic_config['postgresql']['parameters'])
-
-    config = Config('', None).local_configuration  # Get values from env
-    config.setdefault('scope', no_value_msg)
-    config.setdefault('name', socket.gethostname())
+    config.setdefault('bootstrap', {})['dcs'] = dynamic_config
     config.setdefault('postgresql', {})
-    config['postgresql'].setdefault('data_dir', no_value_msg)
-    config['postgresql'].setdefault('connect_address', no_value_msg + ':5432')
-    config['postgresql'].setdefault('listen', no_value_msg + ':5432')
-    config['postgresql'].setdefault('bin_dir', '')
-    config['postgresql'].setdefault('authentication', {})
-    config['postgresql']['authentication'].setdefault(
-        'superuser', {'username': 'postgres'}).setdefault(
-            'password', no_value_msg)
-    config['postgresql']['authentication'].setdefault(
-        'replication', {'username': 'replicator'}).setdefault(
-            'password', no_value_msg)
-    config.setdefault('restapi', {})
-    config['restapi'].setdefault('connect_address', local_ip + ':8008')
-    config['restapi'].setdefault('listen', local_ip + ':8008')
-    config.setdefault('bootstrap', {})
-    config['bootstrap']['dcs'] = dynamic_config
+
+    template_config: Dict[str, Any] = {
+        'scope': no_value_msg,
+        'name': socket.gethostname(),
+        'postgresql': {
+            'data_dir': no_value_msg,
+            'connect_address': no_value_msg + ':5432',
+            'listen': no_value_msg + ':5432',
+            'bin_dir': '',
+            'authentication': {
+                'superuser': {
+                    'username': 'postgres',
+                    'password': no_value_msg
+                },
+                'replication': {
+                    'username': 'replicator',
+                    'password': no_value_msg
+                }
+            }
+        },
+        'restapi': {
+            'connect_address': local_ip + ':8008',
+            'listen': local_ip + ':8008'
+        }
+    }
 
     if not sample:
         enrich_config_from_running_instance(config, no_value_msg, dsn)
@@ -225,6 +231,9 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
                                                                      postgres_bin))
     except PatroniException as e:
         sys.exit(str(e))
+
+    patch_config(template_config, config)
+    config = template_config
 
     # generate sample config
     if sample:
