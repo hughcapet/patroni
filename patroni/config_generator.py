@@ -24,6 +24,17 @@ def get_ip() -> str:
         sys.exit(f'Failed to define ip address. No address returned by getaddrinfo for {hostname}')
 
 
+def get_int_major_version(config: Optional[Dict[str, Any]] = None) -> int:
+    """Get major version of PostgreSQL from the binary as an integer.
+
+    :param config: optional dictionary representing Patroni config. If contains bin_dir and/or the custom
+    bin_name for postgres, the values are used for the version retrieval.
+    """
+    config = config or {}
+    postgres_bin = ((config.get('postgresql') or {}).get('bin_name') or {}).get('postgres', 'postgres')
+    return postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None, postgres_bin))
+
+
 def get_bin_dir_from_running_instance(data_dir: str) -> str:
     postmaster_pid = None
     try:
@@ -125,13 +136,11 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
     default_hba_path = os.path.join(config['postgresql']['data_dir'], 'pg_hba.conf')
     if config['postgresql']['parameters']['hba_file'] == default_hba_path:
         try:
+            allowed_records = ['local', 'host', 'hostssl', 'hostnossl', 'hostgssenc', 'hostnogssenc']
+            if get_int_major_version(config) >= 16:
+                allowed_records += ['include', 'include_if_exists', 'include_dir']
             with open(default_hba_path, 'r') as f:
-                config['postgresql']['pg_hba'] = list(filter(lambda i: i and i.split()[0] in ('local',
-                                                                                              'host',
-                                                                                              'hostssl',
-                                                                                              'hostnossl',
-                                                                                              'hostgssenc',
-                                                                                              'hostnogssenc'),
+                config['postgresql']['pg_hba'] = list(filter(lambda i: i and i.split()[0] in allowed_records,
                                                              (li.strip() for li in f.readlines())))
         except OSError as e:
             sys.exit(f'Failed to read pg_hba.conf: {e}')
@@ -226,11 +235,8 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
         enrich_config_from_running_instance(config, no_value_msg, dsn)
         config['postgresql']['bin_dir'] = get_bin_dir_from_running_instance(config['postgresql']['data_dir'])
 
-    # obtain version from the binary
     try:
-        postgres_bin = config['postgresql'].get('bin_name', {}).get('postgres', 'postgres')
-        pg_version = postgres_major_version_to_int(get_major_version(config['postgresql'].get('bin_dir') or None,
-                                                                     postgres_bin))
+        pg_version = get_int_major_version(config)
     except PatroniException as e:
         sys.exit(str(e))
 
@@ -247,16 +253,15 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
         ]
 
         # add version-specific configuration
-        if pg_version:
-            wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
-            config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
-                ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
+        wal_keep_param = 'wal_keep_segments' if pg_version < 130000 else 'wal_keep_size'
+        config['bootstrap']['dcs']['postgresql']['parameters'][wal_keep_param] =\
+            ConfigHandler.CMDLINE_OPTIONS[wal_keep_param][0]
 
-            config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
-            if pg_version >= 110000:
-                config['postgresql']['authentication'].setdefault(
-                    'rewind', {'username': 'rewind_user'}).setdefault(
-                        'password', no_value_msg)
+        config['bootstrap']['dcs']['postgresql']['use_pg_rewind'] = True
+        if pg_version >= 110000:
+            config['postgresql']['authentication'].setdefault(
+                'rewind', {'username': 'rewind_user'}).setdefault(
+                    'password', no_value_msg)
 
     # redundant values from the default config
     del config['bootstrap']['dcs']['standby_cluster']

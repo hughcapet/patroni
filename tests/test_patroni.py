@@ -401,7 +401,7 @@ class TestGenerateConfig(unittest.TestCase):
 
         # 3. Error while calling postgres --version
         with patch('subprocess.check_output', Mock(side_effect=OSError)),\
-             patch('sys.argv', ['patroni.py', '--generate-config']),\
+             patch('sys.argv', ['patroni.py', '--generate-sample-config']),\
              self.assertRaises(SystemExit) as e:
             _main()
         self.assertIn('Failed to get postgres version:', e.exception.code)
