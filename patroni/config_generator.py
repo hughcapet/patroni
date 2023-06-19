@@ -70,9 +70,11 @@ def enrich_config_from_running_instance(config: Dict[str, Any], no_value_msg: st
         val = parsed_dsn.get(conn_param, os.getenv(env_var))
         if val:
             su_params[conn_param] = val
+    patroni_env_su_username = ((config.get('authentication') or {}).get('superuser') or {}).get('username')
+    patroni_env_su_pwd = ((config.get('authentication') or {}).get('superuser') or {}).get('password')
     # because we use "username" in the config for some reason
-    su_params['username'] = su_params.pop('user', getuser())
-    su_params['password'] = su_params.get('password') or getpass('Please enter the user password:')
+    su_params['username'] = su_params.pop('user', patroni_env_su_username) or getuser()
+    su_params['password'] = su_params.get('password', patroni_env_su_pwd) or getpass('Please enter the user password:')
 
     from . import psycopg
     try:
@@ -177,7 +179,7 @@ def generate_config(file: str, sample: bool, dsn: Optional[str]) -> None:
           If not a sample config, either DSN or PG ENV vars are used to define superuser authentication parameters.
         - rewind user is defined for a sample config if PG version can be defined and PG version is 11+
           (if possible, username is set from the respective Patroni ENV var)
-    - ``bootsrtap.dcs.postgresql.use_pg_rewind
+    - ``bootsrtap.dcs.postgresql.use_pg_rewind``
     - ``postgresql.pg_hba`` defaults or the lines gathered from the source instance's hba_file
     - ``postgresql.pg_ident`` the lines gathered from the source instance's ident_file
 
