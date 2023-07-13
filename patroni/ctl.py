@@ -258,7 +258,7 @@ option_insecure = click.option('-k', '--insecure', is_flag=True, help='Allow con
 role_choice = click.Choice(['leader', 'primary', 'standby-leader', 'replica', 'standby', 'any', 'master'])
 
 
-@click.group()
+@click.group(cls=click.Group)
 @click.option('--config-file', '-c', help='Configuration file',
               envvar='PATRONICTL_CONFIG_FILE', default=CONFIG_FILE_PATH)
 @click.option('--dcs-url', '--dcs', '-d', 'dcs_url', help='The DCS connect url', envvar='DCS_URL')
@@ -1490,7 +1490,8 @@ def output_members(obj: Dict[str, Any], cluster: Cluster, name: str,
         * ``Role``: ``Leader``, ``Standby Leader``, ``Sync Standby`` or ``Replica``;
         * ``State``: ``stopping``, ``stopped``, ``stop failed``, ``crashed``, ``running``, ``starting``,
           ``start failed``, ``restarting``, ``restart failed``, ``initializing new cluster``, ``initdb failed``,
-          ``running custom bootstrap script``, ``custom bootstrap failed``, or ``creating replica``, and so on;
+          ``running custom bootstrap script``, ``custom bootstrap failed``, ``creating replica``, ``streaming``,
+          ``in archive recovery``, and so on;
         * ``TL``: current timeline in Postgres;
           ``Lag in MB``: replication lag.
 

@@ -29,7 +29,8 @@ class MockPostgresql(object):
     name = 'test'
     state = 'running'
     role = 'primary'
-    server_version = '999999'
+    server_version = 90625
+    major_version = 90600
     sysid = 'dummysysid'
     scope = 'dummy'
     pending_restart = True
@@ -54,6 +55,10 @@ class MockPostgresql(object):
     @staticmethod
     def is_running():
         return True
+
+    @staticmethod
+    def replication_state_from_parameters(*args):
+        return 'streaming'
 
 
 class MockWatchdog(object):
@@ -180,7 +185,6 @@ class MockRestApiServer(RestApiServer):
 
 @patch('ssl.SSLContext.load_cert_chain', Mock())
 @patch('ssl.SSLContext.wrap_socket', Mock(return_value=0))
-@patch('ssl.SSLContext.load_verify_locations', Mock(return_value=[Mock()]))
 @patch.object(HTTPServer, '__init__', Mock())
 class TestRestApiHandler(unittest.TestCase):
 
@@ -220,7 +224,7 @@ class TestRestApiHandler(unittest.TestCase):
         with patch.object(MockHa, 'restart_scheduled', Mock(return_value=True)):
             MockRestApiServer(RestApiHandler, 'GET /primary')
         self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /primary'))
-        with patch.object(RestApiServer, 'query', Mock(return_value=[('', 1, '', '', '', '', False, '')])):
+        with patch.object(RestApiServer, 'query', Mock(return_value=[('', 1, '', '', '', '', False, None, None, '')])):
             self.assertIsNotNone(MockRestApiServer(RestApiHandler, 'GET /patroni'))
         with patch.object(GlobalConfig, 'is_standby_cluster', Mock(return_value=True)),\
                 patch.object(GlobalConfig, 'is_paused', Mock(return_value=True)):
@@ -589,7 +593,6 @@ class TestRestApiServer(unittest.TestCase):
     @patch('ssl.SSLContext.load_cert_chain', Mock())
     @patch('ssl.SSLContext.set_ciphers', Mock())
     @patch('ssl.SSLContext.wrap_socket', Mock(return_value=0))
-    @patch('ssl.SSLContext.load_verify_locations', Mock(return_value=[Mock()]))
     @patch.object(HTTPServer, '__init__', Mock())
     def setUp(self):
         self.srv = MockRestApiServer(Mock(), '', {'listen': '*:8008', 'certfile': 'a', 'verify_client': 'required',
@@ -652,10 +655,9 @@ class TestRestApiServer(unittest.TestCase):
         mock_get_request.return_value = (self.__create_socket(), ('127.0.0.1', 55555))
         self.srv._handle_request_noblock()
 
-    @patch('ssl.SSLContext.load_verify_locations', Mock(return_value=[Mock()]))
+    @patch('ssl._ssl._test_decode_cert', Mock())
     def test_reload_local_certificate(self):
         self.assertTrue(self.srv.reload_local_certificate())
 
-    @patch('ssl.SSLContext.load_verify_locations', Mock(side_effect=Exception))
     def test_get_certificate_serial_number(self):
         self.assertIsNone(self.srv.get_certificate_serial_number())
