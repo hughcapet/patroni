@@ -100,7 +100,7 @@ jobs:
       run: python .github/workflows/install_deps.py
       if: matrix.os != 'macos'
     - name: Install systemd pkg on ubuntu
-      run: sudo apt install -y python3-systemd
+      run: sudo apt-get install -y python3-systemd && ls -l /run/systemd/notify
       if: matrix.os == 'ubuntu'
     - name: Run tests and flake8
       run: python .github/workflows/run_tests.py
