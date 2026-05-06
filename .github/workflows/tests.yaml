@@ -99,6 +99,9 @@ jobs:
     - name: Install dependencies
       run: python .github/workflows/install_deps.py
       if: matrix.os != 'macos'
+    - name: Install systemd pkg on ubuntu
+      run: sudo apt install -y python3-systemd
+      if: matrix.os == 'ubuntu'
     - name: Run tests and flake8
       run: python .github/workflows/run_tests.py
       if: matrix.os != 'macos'
