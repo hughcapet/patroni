@@ -47,7 +47,7 @@ Feature: site awareness
   Scenario: test synchronous_cross_site prefer_local and local_only with synchronous_mode_strict when no local nodes
     When I issue a PATCH request to http://127.0.0.1:8011/config with {"synchronous_cross_site": "prefer_local", "synchronous_mode_strict": "true"}
     Then "sync" key in DCS has sync_standby=postgres-2 after 10 seconds
-    And synchronous_standby_names on postgres-3 is set to '"postgres-2"' after 10 seconds
+    And synchronous_standby_names on postgres-3 is set to '2 ("postgres-2","postgres-4")' after 10 seconds
     When I shut down postgres-2
     Then "sync" key in DCS has sync_standby=postgres-1,postgres-4 after 10 seconds
     And synchronous_standby_names on postgres-3 is set to '2 ("postgres-1","postgres-4")' after 10 seconds
