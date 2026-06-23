@@ -972,7 +972,7 @@ def validate_watchdog_mode(value: Any) -> None:
     assert_(value in (False, "off", "automatic", "required"))
 
 
-def validate_synchronous_cross_site(value: Any) -> None:
+def validate_sync_cross_site(value: Any) -> None:
     assert_(isinstance(value, (str, bool)), "expected type is not a string")
     assert_(value in (False, "off", "prefer-local", "prefer-remote", "local-only", "remote-only", "balanced"))
 
@@ -1109,7 +1109,7 @@ schema = Schema({
             },
             Optional("synchronous_mode"): bool,
             Optional("synchronous_mode_strict"): bool,
-            Optional("synchronous_cross_site"): validate_synchronous_cross_site,
+            Optional("synchronous_cross_site"): validate_sync_cross_site,
             Optional("synchronous_node_count"): IntValidator(min=1, raise_assert=True),
         },
         Optional("initdb"): [Or(str, dict)],

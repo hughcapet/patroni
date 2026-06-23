@@ -850,8 +850,7 @@ class Status(NamedTuple):
         if not isinstance(retain_slots, list):
             retain_slots = []
 
-        current_site = value.get('current_site')
-        return Status(last_lsn, slots, retain_slots, current_site)
+        return Status(last_lsn, slots, retain_slots, value.get('current_site'))
 
 
 class Cluster(NamedTuple('Cluster',
