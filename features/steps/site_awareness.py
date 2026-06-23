@@ -34,9 +34,9 @@ def replica_not_lagging(context, name, timeout):
             leader,
             f"SELECT {function_name} - {location_name} FROM pg_catalog.pg_stat_replication \
                 WHERE application_name = '{name}'",
-            fail_ok=False
+            fail_ok=True
         )
-        if cur.fetchall() == [(0,)]:
+        if cur and cur.fetchall() == [(0,)]:
             break
 
         time.sleep(1)

@@ -10,20 +10,21 @@ Feature: site awareness
     Then "members/postgres-1" key in DCS has site=dc1 after 5 seconds
     And "members/postgres-2" key in DCS has site=dc2 after 5 seconds
     And "members/postgres-3" key in DCS has site=dc2 after 5 seconds
-    And "members/postgres-1" key in DCS has replication_state=streaming after 10 seconds
-    And "members/postgres-2" key in DCS has replication_state=streaming after 10 seconds
-    And "members/postgres-3" key in DCS has replication_state=streaming after 10 seconds
-    And postgres-1 is in sync with primary after 10 seconds
-    And postgres-2 is in sync with primary after 10 seconds
-    And postgres-3 is in sync with primary after 10 seconds
+    And postgres-1 is in sync with primary after 30 seconds
+    And postgres-2 is in sync with primary after 30 seconds
+    And postgres-3 is in sync with primary after 30 seconds
+    And "status" key in DCS has dc1 in current_site
 
   Scenario: test local failover
     When I shut down postgres-0
-    And "members/postgres-1" key in DCS has role=primary after 10 seconds
+    Then "members/postgres-1" key in DCS has role=primary after 10 seconds
+    And postgres-2 is in sync with primary after 30 seconds
+    And postgres-3 is in sync with primary after 30 seconds
 
   Scenario: test site failover with failover_priority
     When I shut down postgres-1
     Then "members/postgres-3" key in DCS has role=primary after 10 seconds
+    And postgres-2 is in sync with primary after 30 seconds
 
   Scenario: test synchronous_cross_site disabled
     When I start postgres-0

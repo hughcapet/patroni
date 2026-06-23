@@ -1444,6 +1444,7 @@ class Ha(object):
                     if not self.sync_mode_is_active() or not self.cluster.sync.leader_matches(st.member.name):
                         return False
                     logger.info('Ignoring the former leader being ahead of us')
+                    eligible_members.append(st)
                 elif st.wal_position > 0:  # we want to count votes only from nodes with postgres up and running!
                     quorum_vote = st.member.name in voting_set
                     if quorum_vote:
@@ -1453,8 +1454,7 @@ class Ha(object):
                         eligible_members.append(st)
 
         if current_site:
-            current_site_eligible = [st for st in eligible_members
-                                     if st.data.get('patroni', {}).get('site') == current_site]
+            current_site_eligible = [st for st in eligible_members if st.data.get('site') == current_site]
             if current_site_eligible and self.patroni.site != current_site:
                 logger.info('Local failover in the current site %s is possible, while my site is %s',
                             current_site, self.patroni.site)
