@@ -1449,7 +1449,8 @@ class Ha(object):
                     if quorum_vote:
                         logger.info('Got quorum vote from %s', st.member.name)
                         quorum_votes += 1
-                    eligible_members.append(st)
+                    if my_wal_position == st.wal_position:
+                        eligible_members.append(st)
 
         if current_site:
             current_site_eligible = [st for st in eligible_members

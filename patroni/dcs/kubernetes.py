@@ -1259,7 +1259,8 @@ class Kubernetes(AbstractDCS):
         leader_observed_record = kind_annotations or self._leader_observed_record
         annotations = {self._LEADER: self._name, 'ttl': str(self._ttl), 'renewTime': now,
                        'acquireTime': leader_observed_record.get('acquireTime') or now,
-                       'transitions': leader_observed_record.get('transitions') or '0'}
+                       'transitions': leader_observed_record.get('transitions') or '0',
+                       'current_site': site}
         if last_lsn:
             annotations[self._OPTIME] = str(last_lsn)
             annotations['slots'] = json.dumps(slots, separators=(',', ':')) if slots else None
@@ -1268,9 +1269,6 @@ class Kubernetes(AbstractDCS):
 
         if failsafe is not None:
             annotations[self._FAILSAFE] = json.dumps(failsafe, separators=(',', ':')) if failsafe else None
-
-        if site is not None:
-            annotations['current_site'] = site
 
         resource_version = kind and kind.metadata.resource_version
         return self._update_leader_with_retry(annotations, resource_version, self.__ips)
@@ -1445,7 +1443,7 @@ class Kubernetes(AbstractDCS):
         raise NotImplementedError  # pragma: no cover
 
     def _write_sync_state(self, leader: Optional[str], sync_standby: Optional[Collection[str]],
-                          quorum: Optional[int], cross_site_mode: Optional['SyncCrossSiteMode'],
+                          quorum: Optional[int], cross_site_mode: Optional[SyncCrossSiteMode],
                           version: Optional[str] = None) -> Optional[SyncState]:
         sync_state = self.sync_state(leader, sync_standby, quorum, cross_site_mode)
         sync_state['quorum'] = str(sync_state['quorum']) if sync_state['quorum'] is not None else None

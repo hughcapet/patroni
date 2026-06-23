@@ -597,7 +597,7 @@ class SyncState(NamedTuple):
     leader: Optional[str]
     sync_standby: Optional[str]
     quorum: int
-    cross_site_mode: Optional[SyncCrossSiteMode]
+    cross_site_mode: SyncCrossSiteMode
 
     @staticmethod
     def from_node(version: Optional[_Version], value: Union[str, Dict[str, Any], None]) -> 'SyncState':
@@ -649,7 +649,7 @@ class SyncState(NamedTuple):
 
         :returns: empty synchronisation state object.
         """
-        return SyncState(version, None, None, 0, None)
+        return SyncState(version, None, None, 0, SyncCrossSiteMode.ANY)
 
     @property
     def is_empty(self) -> bool:
@@ -691,7 +691,7 @@ class SyncState(NamedTuple):
                   the sync state.
 
         :Example:
-            >>> s = SyncState(1, 'foo', 'bar,zoo', 0, 'off')
+            >>> s = SyncState(1, 'foo', 'bar,zoo', 0, 'any')
 
             >>> s.matches('foo')
             False
@@ -805,7 +805,7 @@ class Status(NamedTuple):
 
         :returns: ``True`` if all attributes of the current :class:`Status` are unpopulated.
         """
-        return self.last_lsn == 0 and self.slots is None and not self.retain_slots
+        return self.last_lsn == 0 and self.slots is None and not self.retain_slots and self.current_site is None
 
     @staticmethod
     def from_node(value: Union[str, Dict[str, Any], None]) -> 'Status':
@@ -926,7 +926,7 @@ class Cluster(NamedTuple('Cluster',
 
            >>> assert bool(cluster) is False
 
-           >>> status = Status(0, None, [], 'off')
+           >>> status = Status(0, None, [], 'dc1')
            >>> cluster = Cluster(None, None, None, status, [1, 2, 3], None, SyncState.empty(), None, None, {})
            >>> len(cluster)
            1
@@ -1957,8 +1957,9 @@ class AbstractDCS(abc.ABC):
         ret = self._update_leader(cluster.leader)
         if ret and last_lsn:
             status: Dict[str, Any] = {self._OPTIME: last_lsn, 'slots': slots or None,
-                                      'retain_slots': self._build_retain_slots(cluster, slots),
-                                      'current_site': site}
+                                      'retain_slots': self._build_retain_slots(cluster, slots)}
+            if site is not None:
+                status['current_site'] = site
             self.write_status(status)
 
         if ret and failsafe is not None:
@@ -2135,7 +2136,7 @@ class AbstractDCS(abc.ABC):
         """
         return {'leader': leader, 'quorum': quorum,
                 'sync_standby': ','.join(sorted(sync_standby)) if sync_standby else None,
-                'cross_site_mode': cross_site_mode and cross_site_mode.value}
+                'cross_site_mode': cross_site_mode.value if cross_site_mode else None}
 
     def write_sync_state(self, leader: Optional[str], sync_standby: Optional[Collection[str]],
                          quorum: Optional[int], version: Optional[Any] = None) -> Optional[SyncState]:

@@ -369,25 +369,12 @@ END;$$""")
         for replica in replicas:
             site_replicas[replica.site].append(replica)
 
-        # Ensure consistent order of remote sites
-        remote_sites = sorted(site for site in site_replicas if site is not None and site != current_site)
-
         # Create selection order: pick one from each remote site, then local, then undefined, then repeat
+        # Ensure consistent sites order with sorting
         result: List[_Replica] = []
-        remote_lists = [site_replicas[site] for site in remote_sites]
+        remote_lists = [val for site, val in sorted(site_replicas.items()) if site is not None and site != current_site]
         all_iters = remote_lists + [site_replicas[current_site], site_replicas[None]]
-
-        for round_values in zip_longest(*all_iters, fillvalue=None):
-            # First N values are from remote sites
-            for replica in round_values[:-2]:
-                if replica:
-                    result.append(replica)
-            # Next is local site
-            if round_values[-2]:
-                result.append(round_values[-2])
-            # Last is undefined sites
-            if round_values[-1]:
-                result.append(round_values[-1])
+        result = [replica for vals in zip_longest(*all_iters) for replica in vals if replica is not None]
 
         return result
 
@@ -426,8 +413,8 @@ END;$$""")
         cross_site_mode = global_config.sync_cross_site_mode
 
         if self.site:
-            current_site_replicas: List[_Replica] = [r for r in sorted_replicas if r.site and r.site == self.site]
-            remote_replicas: List[_Replica] = [r for r in sorted_replicas if r.site and r.site != self.site]
+            current_site_replicas: List[_Replica] = [r for r in sorted_replicas if r.site == self.site]
+            remote_replicas: List[_Replica] = [r for r in sorted_replicas if r.site != self.site]
 
             if cross_site_mode == SyncCrossSiteMode.BALANCED:
                 selection_order = self.pick_replicas_site_balanced(self.site, sorted_replicas)

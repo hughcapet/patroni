@@ -16,7 +16,7 @@ from .dcs import dcs_modules
 from .exceptions import ConfigParseError, PatroniAssertionError
 from .log import type_logformat
 from .postgresql.sync import SYNC_STRICT_PLACEHOLDER
-from .utils import data_directory_is_empty, get_major_version, parse_int, split_host_port
+from .utils import data_directory_is_empty, get_major_version, parse_int, split_host_port, SyncCrossSiteMode
 
 # Additional parameters to fine-tune validation process
 _validation_params: Dict[str, Any] = {}
@@ -973,8 +973,7 @@ def validate_watchdog_mode(value: Any) -> None:
 
 
 def validate_sync_cross_site(value: Any) -> None:
-    assert_(isinstance(value, (str, bool)), "expected type is not a string")
-    assert_(value in (False, "off", "prefer-local", "prefer-remote", "local-only", "remote-only", "balanced"))
+    assert_(value in [a.value.replace('_', '-') for a in SyncCrossSiteMode.__members__.values()])
 
 
 def validate_name(value: Any) -> None:
@@ -999,6 +998,7 @@ setattr(validate_host_port_listen_multiple_hosts, 'expected_type', str)
 setattr(validate_data_dir, 'expected_type', str)
 setattr(validate_binary_name, 'expected_type', str)
 setattr(validate_name, 'expected_type', str)
+setattr(validate_sync_cross_site, 'expected_type', str)
 validate_etcd = {
     Or("host", "hosts", "srv", "srv_suffix", "url", "proxy"): Case({
         "host": validate_host_port,
