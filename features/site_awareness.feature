@@ -13,6 +13,9 @@ Feature: site awareness
     And "members/postgres-1" key in DCS has replication_state=streaming after 10 seconds
     And "members/postgres-2" key in DCS has replication_state=streaming after 10 seconds
     And "members/postgres-3" key in DCS has replication_state=streaming after 10 seconds
+    And postgres-1 is in sync with primary after 10 seconds
+    And postgres-2 is in sync with primary after 10 seconds
+    And postgres-3 is in sync with primary after 10 seconds
 
   Scenario: test local failover
     When I shut down postgres-0
