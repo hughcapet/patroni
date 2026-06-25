@@ -147,10 +147,8 @@ class TestCtl(unittest.TestCase):
 
                 cluster = get_cluster_initialized_with_leader()
                 mock_echo.reset_mock()
-                self.assertIsNone(output_members(cluster, name='abc', site='dc1', fmt='tsv'))
-                self.assertEqual(mock_echo.call_args_list[1][0][0],
-                                 'abc\tdc1\tleader\t127.0.0.1:5435\tLeader\trunning\t\t\t\t\t\t\t')
-                self.assertEqual(len(mock_echo.call_args_list), 2)
+                self.assertIsNone(output_members(cluster, name='abc', site='foo', fmt='tsv'))
+                self.assertEqual(len(mock_echo.call_args_list), 1)
 
     @patch('patroni.dcs.AbstractDCS.set_failover_value', Mock())
     def test_switchover(self):
@@ -520,7 +518,7 @@ class TestCtl(unittest.TestCase):
         del config['citus']
         with patch('patroni.ctl.load_config', Mock(return_value=config)):
             result = self.runner.invoke(ctl, ['list'])
-            assert 'Cluster: alpha (12345678901) -' in result.output
+            assert 'Cluster: alpha (12345678901) Site: dc1 -' in result.output
 
         with patch('patroni.ctl.load_config', Mock(return_value={})):
             self.runner.invoke(ctl, ['list'])
@@ -565,15 +563,15 @@ class TestCtl(unittest.TestCase):
                                        'tags': {'replicatefrom': 'nonexistinghost'}}))
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=cluster)):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
-            assert '+\n| dc1  |     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
-            assert '|\n| dc2  |     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
-            assert '|\n|      |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
-            assert '|\n|      |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
+            assert '+\n|     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
+            assert '|\n|     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
+            assert '|\n|     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
+            assert '|\n|     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
 
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=get_cluster_initialized_without_leader())):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
-            assert '+\n| dc1  |     0 | + leader | 127.0.0.1:5435 | Replica |' in result.output
-            assert '|\n| dc2  |     0 | + other  | 127.0.0.1:5436 | Replica |' in result.output
+            assert '+\n|     0 | + leader | 127.0.0.1:5435 | Replica |' in result.output
+            assert '|\n|     0 | + other  | 127.0.0.1:5436 | Replica |' in result.output
 
     @patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=get_cluster_initialized_with_leader()))
     def test_flush_restart(self):

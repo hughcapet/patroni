@@ -48,7 +48,7 @@ def get_cluster(initialize, leader, members, failover, sync, cluster_config=None
                               [(1, 67197376, 'no recovery target specified', t, 'foo')])
     cluster_config = cluster_config or ClusterConfig(1, {'check_timeline': True, 'member_slots_ttl': 0}, 1)
     return Cluster(initialize, cluster_config, leader,
-                   Status(10, None, [], None), members, failover, sync, history, failsafe)
+                   Status(10, None, [], 'dc1'), members, failover, sync, history, failsafe)
 
 
 def get_cluster_not_initialized_without_leader(cluster_config=None):
@@ -59,7 +59,8 @@ def get_cluster_bootstrapping_without_leader(cluster_config=None):
     return get_cluster("", None, [], None, SyncState.empty(), cluster_config)
 
 
-def get_cluster_initialized_without_leader(leader=False, failover=None, sync=None, cluster_config=None, failsafe=False):
+def get_cluster_initialized_without_leader(leader=False, failover=None, sync=None, cluster_config=None, failsafe=False,
+                                           cross_site_mode=SyncCrossSiteMode.ANY):
     m1 = Member(0, 'leader', 28, {'conn_url': 'postgres://replicator:rep-pass@127.0.0.1:5435/postgres',
                                   'api_url': 'http://127.0.0.1:8008/patroni', 'xlog_location': 4,
                                   'role': PostgresqlRole.PRIMARY, 'state': 'running', 'site': 'dc1'})
@@ -67,13 +68,13 @@ def get_cluster_initialized_without_leader(leader=False, failover=None, sync=Non
     m2 = Member(0, 'other', 28, {'conn_url': 'postgres://replicator:rep-pass@127.0.0.1:5436/postgres',
                                  'api_url': 'http://127.0.0.1:8011/patroni',
                                  'state': 'running',
-                                 'site': 'dc2',
+                                 'site': 'dc1',
                                  'pause': True,
                                  'tags': {'clonefrom': True},
                                  'scheduled_restart': {'schedule': "2100-01-01 10:53:07.560445+00:00",
                                                        'postgres_version': '99.0.0'}})
     syncstate = SyncState(0 if sync else None, sync and sync[0],
-                          sync and sync[1], sync[2] if sync and len(sync) > 2 else 0, SyncCrossSiteMode.ANY)
+                          sync and sync[1], sync[2] if sync and len(sync) > 2 else 0, cross_site_mode)
     failsafe = {m.name: m.api_url for m in (m1, m2)} if failsafe else None
     return get_cluster(SYSID, leader, [m1, m2], failover, syncstate, cluster_config, failsafe)
 
@@ -111,7 +112,8 @@ def _check_timeline_and_lsn(self, *args):
 
 def get_node_status(reachable=True, in_recovery=True, dcs_last_seen=0,
                     timeline=2, wal_position=10, nofailover=False,
-                    watchdog_failed=False, failover_priority=1, sync_priority=1):
+                    watchdog_failed=False, failover_priority=1, sync_priority=1,
+                    site='dc1'):
     def fetch_node_status(e):
         tags = {}
         if nofailover:
@@ -120,7 +122,7 @@ def get_node_status(reachable=True, in_recovery=True, dcs_last_seen=0,
         tags['sync_priority'] = sync_priority
         return _MemberStatus(e, reachable, in_recovery, wal_position,
                              {'tags': tags, 'watchdog_failed': watchdog_failed,
-                              'dcs_last_seen': dcs_last_seen, 'timeline': timeline})
+                              'dcs_last_seen': dcs_last_seen, 'timeline': timeline, 'site': site})
     return fetch_node_status
 
 
@@ -1130,6 +1132,27 @@ class TestHa(PostgresInit):
         self.ha.patroni.nofailover = None
         self.ha.patroni.failover_priority = 0
         self.assertFalse(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+        # multisite
+        self.ha.patroni.site = 'dc2'
+        with patch('patroni.ha.logger.info') as mock_info, \
+             patch('patroni.postgresql.Postgresql.last_operation', return_value=12):
+            # no up-to-date local memebers
+            self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+            self.assertEqual(mock_info.call_args_list[0][0][0],
+                             'No members in the curent site. Performing cross-site failover/switchover')
+            mock_info.reset_mock()
+            # local node with nofailover
+            self.ha.fetch_node_status = get_node_status(wal_position=12, nofailover=True)
+            self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+            self.assertEqual(mock_info.call_args_list[0][0][0],
+                             'No members in the curent site. Performing cross-site failover/switchover')
+            mock_info.reset_mock()
+            # local failover possible (although my failover priority is higher)
+            self.ha.patroni.failover_priority = 2
+            self.ha.fetch_node_status = get_node_status(wal_position=12, failover_priority=1)
+            self.assertFalse(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+            self.assertEqual(mock_info.call_args_list[0][0][0],
+                             'Local failover in the current site %s is possible, while my site is %s')
 
     def test_fetch_node_status(self):
         member = Member(0, 'test', 1, {'api_url': 'http://127.0.0.1:8011/patroni'})
@@ -1548,6 +1571,24 @@ class TestHa(PostgresInit):
         self.ha.dcs.write_sync_state.assert_not_called()
         self.assertEqual(mock_set_sync.call_count, 1)
         self.assertEqual(mock_set_sync.call_args_list[0][0][0], CaseInsensitiveSet(['foo']))
+
+        # strict mode, no nodes available, switching from prefer_local to local_only
+        self.ha.cluster = get_cluster_initialized_without_leader(leader=True, sync=('leader', None),
+                                                                 cross_site_mode=SyncCrossSiteMode.PREFER_LOCAL)
+        self.p.sync_handler.current_state = Mock(return_value=_SyncState('priority', 1,
+                                                                         CaseInsensitiveSet(),
+                                                                         CaseInsensitiveSet(),
+                                                                         CaseInsensitiveSet()))
+        self.ha.dcs.write_sync_state.reset_mock()
+        mock_set_sync.reset_mock()
+        with patch.object(global_config.__class__, 'is_synchronous_mode_strict', PropertyMock(return_value=True)), \
+             patch.object(global_config.__class__, 'sync_cross_site_mode',
+                          PropertyMock(return_value=SyncCrossSiteMode.LOCAL_ONLY)):
+            self.ha.run_cycle()
+        self.assertEqual(self.ha.dcs.write_sync_state.call_count, 1)
+        self.assertEqual(self.ha.dcs.write_sync_state.call_args_list[0][0], ('leader', CaseInsensitiveSet(), 0))
+        self.assertEqual(mock_set_sync.call_count, 1)
+        self.assertEqual(mock_set_sync.call_args_list[0][0], (CaseInsensitiveSet(), 1))
 
         # Test the value configured by the user for synchronous_standby_names is used when synchronous mode is disabled
         self.ha.is_synchronous_mode = false
@@ -2055,6 +2096,23 @@ class TestHa(PostgresInit):
         mock_write_sync.assert_not_called()
         self.assertEqual(mock_set_sync.call_count, 1)
         self.assertEqual(mock_set_sync.call_args_list[0][0], ('ANY 1 (foo)',))
+
+        # strict mode, no nodes available, switching from prefer_local to local_only
+        self.ha.cluster = get_cluster_initialized_without_leader(leader=True, sync=('leader', None),
+                                                                 cross_site_mode=SyncCrossSiteMode.PREFER_LOCAL)
+        self.p.sync_handler.current_state = Mock(return_value=_SyncState('quorum', 1,
+                                                                         CaseInsensitiveSet(),
+                                                                         CaseInsensitiveSet(),
+                                                                         CaseInsensitiveSet()))
+        mock_set_sync.reset_mock()
+        with patch.object(global_config.__class__, 'is_synchronous_mode_strict', PropertyMock(return_value=True)), \
+             patch.object(global_config.__class__, 'sync_cross_site_mode',
+                          PropertyMock(return_value=SyncCrossSiteMode.LOCAL_ONLY)):
+            self.ha.run_cycle()
+        self.assertEqual(mock_write_sync.call_count, 1)
+        self.assertEqual(mock_write_sync.call_args_list[0][0], ('leader', CaseInsensitiveSet(), 0))
+        self.assertEqual(mock_set_sync.call_count, 1)
+        self.assertEqual(mock_set_sync.call_args_list[0][0], ('ANY 1 (__patroni_strict_sync_replica_placeholder__)',))
 
     def test_is_failover_possible(self):
         self.p._major_version = 140000  # supports_multiple_sync

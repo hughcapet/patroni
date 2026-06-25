@@ -424,11 +424,10 @@ END;$$""")
                 else:
                     selection_order = current_site_replicas
                 if cross_site_mode in (SyncCrossSiteMode.PREFER_LOCAL, SyncCrossSiteMode.PREFER_REMOTE):
-                    if not selection_order:
-                        selection_order = sorted_replicas
-                    if len(selection_order) < sync_node_count:
-                        selection_order += remote_replicas if cross_site_mode == SyncCrossSiteMode.PREFER_LOCAL \
-                            else current_site_replicas
+                    additional_count = max(0, sync_node_count - len(selection_order))
+                    selection_order += remote_replicas[:additional_count] \
+                        if cross_site_mode == SyncCrossSiteMode.PREFER_LOCAL \
+                        else current_site_replicas[:additional_count]
             else:
                 selection_order = sorted_replicas
         else:

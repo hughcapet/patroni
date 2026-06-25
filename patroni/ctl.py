@@ -29,7 +29,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, cast, Dict, Generator, Iterator, List, Optional, Tuple, TYPE_CHECKING, Union
 from urllib.parse import urlparse
 
 import click
@@ -1317,7 +1317,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         if cluster_leader != switchover_leader:
             raise PatroniCtlException(f'Member {switchover_leader} is not the leader of cluster {cluster_name}')
 
-    candidates = list(filter(lambda m: m.site == site, cluster.members)) if site else cluster.members
+    candidates = [m for m in cluster.members if m.site == site] if site else cluster.members
     # excluding members with nofailover tag
     candidate_names = [str(m.name) for m in candidates if m.name != cluster_leader and not m.nofailover]
     # We sort the names for consistent output to the client
@@ -1375,7 +1375,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         demote_msg = f', demoting current leader {cluster_leader}' if cluster_leader else ''
         if cluster_leader and candidate:
             current_site = cluster.status.current_site
-            candidate_site = list(filter(lambda m: m.name == candidate, cluster.members))[0].site
+            candidate_site = cast(Member, cluster.get_member(candidate, False)).site
             if (current_site or candidate_site) and current_site != candidate_site:
                 demote_msg += f' in site {str(current_site)} and switching to site {str(candidate_site)}'
         if scheduled_at_str:
