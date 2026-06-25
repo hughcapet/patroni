@@ -93,7 +93,7 @@ class GlobalConfig(types.ModuleType):
     @property
     def sync_cross_site_mode(self) -> SyncCrossSiteMode:
         try:
-            val = SyncCrossSiteMode((self.get('synchronous_cross_site') or 'any').lower().replace('-', '_'))
+            val = SyncCrossSiteMode((self.get('synchronous_cross_site') or 'any').lower())
         except ValueError:
             val = SyncCrossSiteMode.ANY
         return val

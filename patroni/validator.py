@@ -973,7 +973,7 @@ def validate_watchdog_mode(value: Any) -> None:
 
 
 def validate_sync_cross_site(value: Any) -> None:
-    assert_(value in [a.value.replace('_', '-') for a in SyncCrossSiteMode.__members__.values()])
+    assert_(value in [a.value for a in SyncCrossSiteMode.__members__.values()])
 
 
 def validate_name(value: Any) -> None:

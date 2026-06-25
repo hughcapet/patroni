@@ -232,8 +232,8 @@ class TestSync(BaseTestPostgresql):
 
         self.s.site = 'dc1'
 
-        # local-only
-        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'local-only',
+        # local_only
+        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'local_only',
                                    'synchronous_node_count': 2}, 1)
         cluster = Cluster(True, config, leader, Status.empty(), [me, one, another], None,
                           SyncState(0, me.name, None, 0, SyncCrossSiteMode.LOCAL_ONLY), None, None, None)
@@ -242,8 +242,8 @@ class TestSync(BaseTestPostgresql):
             self.assertEqual(self.s.current_state(cluster),
                              ('off', 0, CaseInsensitiveSet(), CaseInsensitiveSet(), CaseInsensitiveSet([one.name])))
 
-        # prefer-local
-        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'prefer-local',
+        # prefer_local
+        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'prefer_local',
                                    'synchronous_node_count': 2}, 1)
         # with no local nodes
         cluster = Cluster(True, config, leader, Status.empty(), [me, another], None,
@@ -260,8 +260,8 @@ class TestSync(BaseTestPostgresql):
             self.assertEqual(self.s.current_state(cluster), ('off', 0, CaseInsensitiveSet(), CaseInsensitiveSet(),
                                                              CaseInsensitiveSet([one.name, another.name])))
 
-        # remote-only
-        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'remote-only',
+        # remote_only
+        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'remote_only',
                                    'synchronous_node_count': 2}, 1)
         cluster = Cluster(True, config, leader, Status.empty(), [me, one, another], None,
                           SyncState(0, me.name, None, 0, SyncCrossSiteMode.LOCAL_ONLY), None, None, None)
@@ -271,14 +271,14 @@ class TestSync(BaseTestPostgresql):
             self.assertEqual(self.s.current_state(cluster), ('off', 0, CaseInsensitiveSet(), CaseInsensitiveSet(),
                                                              CaseInsensitiveSet([another.name])))
 
-        # prefer-remote
+        # prefer_remote
         # add one local with a higher sync priority
         yetanother = Member(0, 'yetanother', 28, {'conn_url': 'postgres://replicator:rep-pass@127.0.0.1:5433/postgres',
                                                   'state': PostgresqlState.RUNNING, 'site': 'dc1',
                                                   'tags': {'sync_priority': 3}})
         pg_stat_replication.append({'pid': 103, 'application_name': yetanother.name, 'sync_state': 'async',
                                     'flush_lsn': 1, 'replay_lsn': 1})
-        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'prefer-remote',
+        config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'prefer_remote',
                                    'synchronous_node_count': 2}, 1)
         cluster = Cluster(True, config, leader, Status.empty(), [me, one, another, yetanother], None,
                           SyncState(0, me.name, None, 0, SyncCrossSiteMode.LOCAL_ONLY), None, None, None)

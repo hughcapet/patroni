@@ -446,13 +446,13 @@ class TestValidator(unittest.TestCase):
 
     def test_validate_sync_cross_site(self, mock_out, mock_err):
         c = copy.deepcopy(config)
-        c['bootstrap']['dcs']['synchronous_cross_site'] = 'local-only'
+        c['bootstrap']['dcs']['synchronous_cross_site'] = 'local_only'
         errors = schema(c)
         output = "\n".join(errors)
         print(output)
         self.assertEqual(['postgresql.bin_dir', 'raft.bind_addr', 'raft.self_addr'], parse_output(output))
 
-        c['bootstrap']['dcs']['synchronous_cross_site'] = 'local_only'
+        c['bootstrap']['dcs']['synchronous_cross_site'] = 'local-only'
         errors = schema(c)
         output = "\n".join(errors)
         print(output)
