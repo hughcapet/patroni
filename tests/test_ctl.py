@@ -509,10 +509,10 @@ class TestCtl(unittest.TestCase):
         result = self.runner.invoke(ctl, ['list'])
         assert '127.0.0.1' in result.output
         assert result.exit_code == 0
-        assert 'Citus cluster: alpha -' in result.output
+        assert ' Citus cluster: alpha Site: dc1 -' in result.output
 
         result = self.runner.invoke(ctl, ['list', '--group', '0'])
-        assert 'Citus cluster: alpha (group: 0, 12345678901) -' in result.output
+        assert 'Citus cluster: alpha (group: 0, 12345678901) Site: dc1 -' in result.output
 
         config = get_default_config()
         del config['citus']
@@ -563,10 +563,10 @@ class TestCtl(unittest.TestCase):
                                        'tags': {'replicatefrom': 'nonexistinghost'}}))
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=cluster)):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
-            assert '+\n|     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
-            assert '|\n|     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
-            assert '|\n|     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
-            assert '|\n|     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
+            assert '+\n| dc1  |     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
+            assert '|\n| dc1  |     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
+            assert '|\n|      |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
+            assert '|\n|      |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
 
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=get_cluster_initialized_without_leader())):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])

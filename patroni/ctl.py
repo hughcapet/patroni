@@ -1626,7 +1626,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         if extended or any(m.get(c.lower().replace(' ', '_')) for m in all_members):
             columns.append(c)
 
-    cluster_sites = set(m.get('site') for m in all_members if m.get('site'))
+    cluster_sites = set(m.get('site') for m in all_members)
     if len(cluster_sites) > 1:
         columns.insert(1, 'Site')
 
@@ -1688,9 +1688,10 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         title_details = '' if group is None else f' (group: {group}, {initialize})'
     else:
         title = 'Cluster'
-        title_details = f" ({initialize}){len(cluster_sites) == 1 and ' Site: ' + list(cluster_sites)[0] or ''}"
+        title_details = f' ({initialize})'
 
-    title = f' {title}: {name}{title_details} '
+    site = len(cluster_sites) == 1 and list(cluster_sites)[0] is not None and ' Site: ' + list(cluster_sites)[0] or ''
+    title = f' {title}: {name}{title_details}{site} '
     if fmt in ('pretty', 'topology'):
         columns[columns.index('Replay Lag')] = columns[columns.index('Receive Lag')] = 'Lag'
     print_output(columns, rows,
