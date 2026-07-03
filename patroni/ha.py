@@ -452,11 +452,9 @@ class Ha(object):
                 'api_url': self.patroni.api.connection_string,
                 'state': self.state_handler.state,
                 'role': self.state_handler.role,
-                'version': self.patroni.version
+                'version': self.patroni.version,
+                'site': str(self.patroni.site)
             }
-            site = self.patroni.site
-            if site:
-                data['site'] = site
 
             proxy_url = self.state_handler.proxy_url
             if proxy_url:
@@ -1453,7 +1451,9 @@ class Ha(object):
                     if my_wal_position == st.wal_position:
                         eligible_members.append(st)
 
-        if current_site:
+        if self.cluster.failover and self.cluster.failover.site:
+            eligible_members = [st for st in eligible_members if st.data.get('site') == self.cluster.failover.site]
+        elif current_site:
             current_site_eligible = [st for st in eligible_members if st.data.get('site') == current_site]
             if current_site_eligible and self.patroni.site != current_site:
                 logger.info('Local failover in the current site %s is possible, while my site is %s',
@@ -1549,7 +1549,7 @@ class Ha(object):
                 if not self.cluster.get_member(failover.candidate, fallback_to_leader=False)\
                         and self.state_handler.is_primary():
                     logger.warning("%s: removing failover key because failover candidate is not running", action)
-                    self.dcs.manual_failover('', '', version=failover.version)
+                    self.dcs.manual_failover('', '', '', version=failover.version)
                     return None
                 return False
 
@@ -1572,6 +1572,13 @@ class Ha(object):
 
             # at this point we should consider all members as a candidates for failover/switchover
             # i.e. we assume that failover.candidate is None
+        elif failover.site:
+            if self.patroni.site != failover.site:
+                return False
+
+            if self.is_synchronous_mode() and not self.is_quorum_commit_mode()\
+                    and not self.cluster.sync.matches(self.state_handler.name, True):
+                return False
         elif self.is_paused():
             return False
 
@@ -1851,7 +1858,7 @@ class Ha(object):
         # it is not the time for the scheduled switchover yet, do nothing
         if (failover.scheduled_at and not
             self.should_run_scheduled_action(bare_action, failover.scheduled_at, lambda:
-                                             self.dcs.manual_failover('', '', version=failover.version))):
+                                             self.dcs.manual_failover('', '', '', version=failover.version))):
             return
 
         if not failover.leader or failover.leader == self.state_handler.name:
@@ -1870,14 +1877,14 @@ class Ha(object):
             logger.warning('%s: leader name does not match: %s != %s', action, failover.leader, self.state_handler.name)
 
         logger.info('Cleaning up failover key')
-        self.dcs.manual_failover('', '', version=failover.version)
+        self.dcs.manual_failover('', '', '', version=failover.version)
 
     def process_unhealthy_cluster(self) -> str:
         """Cluster has no leader key"""
         # First, we want to handle primary_race_backoff. Do it only for non-standby cluster,
         # not in maintenance mode and when there is no manual failover/switchover in progress.
         if not self.is_paused() and not self.is_standby_cluster() and \
-                not (self.cluster.failover and self.cluster.failover.candidate) and \
+                not (self.cluster.failover and (self.cluster.failover.candidate or self.cluster.failover.site)) and \
                 global_config.primary_race_backoff > 0 and self._prev_wal_lsn is not None:
             if self._primary_race_backoff_timestamp == 0:
                 self._primary_race_backoff_timestamp = time.time()
@@ -1895,12 +1902,13 @@ class Ha(object):
             if self.acquire_lock():
                 failover = self.cluster.failover
                 if failover:
-                    if self.is_paused() and failover.leader and failover.candidate:
+                    if self.is_paused() and failover.leader and (failover.candidate or failover.site):
                         logger.info('Updating failover key after acquiring leader lock...')
-                        self.dcs.manual_failover('', failover.candidate, failover.scheduled_at, failover.version)
+                        self.dcs.manual_failover('', failover.candidate, failover.site, failover.scheduled_at,
+                                                 failover.version)
                     else:
                         logger.info('Cleaning up failover key after acquiring leader lock...')
-                        self.dcs.manual_failover('', '')
+                        self.dcs.manual_failover('', '', '')
                 self.load_cluster_from_dcs()
 
                 if self.is_standby_cluster():
@@ -1921,7 +1929,7 @@ class Ha(object):
             # When we are doing manual failover there is no guaranty that new leader is ahead of any other node.
             # Node tagged as nofailover can be also ahead of the new leader, but it is always excluded from elections
             # and therefore we trigger rewind checks on it, but only if not in pause, because there is no race in pause.
-            if self.cluster.failover and self.cluster.failover.candidate or \
+            if self.cluster.failover and (self.cluster.failover.candidate or self.cluster.failover.site) or \
                     self.patroni.nofailover and not self.is_paused():
                 self._rewind.trigger_check_diverged_lsn()
                 time.sleep(2)  # Give a time to somebody to take the leader lock
@@ -2627,6 +2635,8 @@ class Ha(object):
             # in synchronous mode we allow failover (not switchover!) to async node
             if self.sync_mode_is_active() and not self.cluster.sync.matches(node.name)\
                     and not (failover and not failover.leader):
+                return False
+            if failover and failover.site and node.data.get('site') != failover.site:
                 return False
             # Don't spend time on "nofailover" nodes checking.
             # We also don't need nodes which we can't query with the api in the list.

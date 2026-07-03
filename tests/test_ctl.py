@@ -128,7 +128,7 @@ class TestCtl(unittest.TestCase):
         with click.Context(click.Command('list')) as ctx:
             ctx.obj = {'__config': {}, '__mpp': get_mpp({})}
             scheduled_at = datetime.now(tzutc) + timedelta(seconds=600)
-            cluster = get_cluster_initialized_with_leader(Failover(1, 'foo', 'bar', scheduled_at))
+            cluster = get_cluster_initialized_with_leader(Failover(1, 'foo', 'bar', scheduled_at, None))
             del cluster.members[1].data['conn_url']
             cluster.members[1].data['replication_state'] = 'streaming'
             cluster.members[1].data['xlog_location'] = 3
@@ -252,6 +252,27 @@ class TestCtl(unittest.TestCase):
         result = self.runner.invoke(ctl, ['switchover', 'dummy', '--force'], input='\n')
         self.assertEqual(result.exit_code, 1)
         self.assertIn('For Citus clusters the --group must me specified', result.output)
+
+        # --candidate + --site
+        result = self.runner.invoke(ctl, ['switchover', 'dummy',
+                                          '--candidate', 'other', '--site', 'site', '--group', '0'], input='\n')
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('--candidate and --site are mutually exclusive options', result.output)
+
+        # does not exist
+        result = self.runner.invoke(ctl, ['switchover', 'dummy', '--site', 'site', '--group', '0'], input='\n')
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('Site site does not exist in cluster dummy', result.output)
+
+        # cross-site
+        cluster = get_cluster_initialized_with_leader()
+        cluster.members[1].data['site'] = 'dc2'
+        with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=cluster)):
+            result = self.runner.invoke(ctl, ['switchover', 'dummy', '--group', '0', '--site', 'dc2'],
+                                        input='leader\nother\n\ny')
+            print(result.output)
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn('demoting current leader leader in site dc1 and switching to site dc2', result.output)
 
     @patch('patroni.dcs.AbstractDCS.set_failover_value', Mock())
     def test_failover(self):
@@ -565,8 +586,8 @@ class TestCtl(unittest.TestCase):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
             assert '+\n| dc1  |     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
             assert '|\n| dc1  |     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
-            assert '|\n|      |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
-            assert '|\n|      |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
+            assert '|\n| None |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
+            assert '|\n| None |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
 
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=get_cluster_initialized_without_leader())):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
@@ -592,7 +613,7 @@ class TestCtl(unittest.TestCase):
 
         scheduled_at = datetime.now(tzutc) + timedelta(seconds=600)
         with patch('patroni.dcs.AbstractDCS.get_cluster',
-                   Mock(return_value=get_cluster_initialized_with_leader(Failover(1, 'a', 'b', scheduled_at)))):
+                   Mock(return_value=get_cluster_initialized_with_leader(Failover(1, 'a', 'b', scheduled_at, None)))):
             result = self.runner.invoke(ctl, ['-k', 'flush', 'dummy', 'switchover'])
             assert result.output.startswith('Success: ')
 

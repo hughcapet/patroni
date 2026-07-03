@@ -1275,6 +1275,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
 
     :raises:
         :class:`PatroniCtlException`: if:
+            * both *candidate* and *site* are provided; or
             * Patroni is running on a Citus cluster, but no *group* was specified; or
             * a switchover was requested by the cluster has no leader; or
             * *switchover_leader* does not match the current leader of the cluster; or
@@ -1286,6 +1287,9 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
             * trying to schedule a switchover in a cluster that is in maintenance mode; or
             * user aborts the operation.
     """
+    if candidate is not None and site is not None:
+        raise PatroniCtlException('--candidate and --site are mutually exclusive options')
+
     dcs = get_dcs(cluster_name, group)
     cluster = dcs.get_cluster()
     click.echo('Current cluster topology')
@@ -1317,7 +1321,11 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         if cluster_leader != switchover_leader:
             raise PatroniCtlException(f'Member {switchover_leader} is not the leader of cluster {cluster_name}')
 
-    candidates = [m for m in cluster.members if m.site == site] if site else cluster.members
+    site_names = set(str(m.site)for m in cluster.members)
+    if site and site not in site_names:
+        raise PatroniCtlException(f'Site {site} does not exist in cluster {cluster_name}')
+
+    candidates = [m for m in cluster.members if str(m.site) == site] if site else cluster.members
     # excluding members with nofailover tag
     candidate_names = [str(m.name) for m in candidates if m.name != cluster_leader and not m.nofailover]
     # We sort the names for consistent output to the client
@@ -1367,6 +1375,8 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         failover_value['leader'] = switchover_leader
     if scheduled_at_str:
         failover_value['scheduled_at'] = scheduled_at_str
+    if site:
+        failover_value['site'] = site
 
     logging.debug(failover_value)
 
@@ -1413,7 +1423,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         logging.exception(r)
         logging.warning('Failing over to DCS')
         click.echo('{0} Could not {1} using Patroni api, falling back to DCS'.format(timestamp(), action))
-        dcs.manual_failover(switchover_leader, candidate, scheduled_at=scheduled_at)
+        dcs.manual_failover(switchover_leader, candidate, site, scheduled_at=scheduled_at)
 
     output_members(cluster, cluster_name, group=group)
 
@@ -1626,7 +1636,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         if extended or any(m.get(c.lower().replace(' ', '_')) for m in all_members):
             columns.append(c)
 
-    cluster_sites = set(m.get('site') for m in all_members)
+    cluster_sites = set(str(m.get('site')) for m in all_members)
     if len(cluster_sites) > 1:
         columns.insert(1, 'Site')
 
@@ -1670,7 +1680,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
                           receive_lsn=receive_lsn, replay_lsn=replay_lsn,
                           pending_restart='*' if member.get('pending_restart') else '',
                           pending_restart_reason=restart_reason,
-                          site=member.get('site', ''))
+                          site=str(member.get('site')))
 
             if append_port and member['host'] and member.get('port'):
                 member['host'] = ':'.join([member['host'], str(member['port'])])
@@ -1690,7 +1700,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         title = 'Cluster'
         title_details = f' ({initialize})'
 
-    site = len(cluster_sites) == 1 and list(cluster_sites)[0] is not None and ' Site: ' + list(cluster_sites)[0] or ''
+    site = len(cluster_sites) == 1 and list(cluster_sites)[0] != 'None' and ' Site: ' + list(cluster_sites)[0] or ''
     title = f' {title}: {name}{title_details}{site} '
     if fmt in ('pretty', 'topology'):
         columns[columns.index('Replay Lag')] = columns[columns.index('Receive Lag')] = 'Lag'
@@ -1833,7 +1843,7 @@ def flush(cluster_name: str, group: Optional[int],
 
         logging.warning('Failing over to DCS')
         click.echo('{0} Could not find any accessible member of cluster {1}'.format(timestamp(), cluster_name))
-        dcs.manual_failover('', '', version=failover.version)
+        dcs.manual_failover('', '', '', version=failover.version)
 
 
 def wait_until_pause_is_applied(dcs: AbstractDCS, paused: bool, old_cluster: Cluster) -> None:

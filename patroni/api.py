@@ -228,8 +228,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
             'scope': patroni.postgresql.scope,
             'name': patroni.postgresql.name
         }
-        if patroni.site is not None:
-            response['site'] = patroni.site
+
+        response['site'] = str(patroni.site)
         if patroni.scheduled_restart:
             response['scheduled_restart'] = patroni.scheduled_restart.copy()
             del response['scheduled_restart']['postmaster_start_time']
@@ -1075,7 +1075,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         """
         failover = self.server.patroni.dcs.get_cluster().failover
         if failover and failover.scheduled_at:
-            if not self.server.patroni.dcs.manual_failover('', '', version=failover.version):
+            if not self.server.patroni.dcs.manual_failover('', '', '', version=failover.version):
                 return self.send_error(409)
             else:
                 data = "scheduled switchover deleted"
@@ -1195,7 +1195,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
             * ``leader``: name of the current leader in the cluster;
             * ``candidate``: name of the Patroni node to be promoted;
             * ``scheduled_at``: a string representing the timestamp when to execute the switchover/failover, e.g.
-                ``2023-04-14T20:27:00+00:00``.
+                ``2023-04-14T20:27:00+00:00``;
+            * ``site``: name of the cluster site to chose a candidate from.
 
         Response HTTP status codes:
 
@@ -1219,6 +1220,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         leader = request.get('leader')
         candidate = request.get('candidate') or request.get('member')
         scheduled_at = request.get('scheduled_at')
+        site = request.get('site')
         cluster = self.server.patroni.dcs.get_cluster()
         config = global_config.from_cluster(cluster)
 
@@ -1254,7 +1256,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
                 status_code = 412
 
         if not data:
-            if self.server.patroni.dcs.manual_failover(leader, candidate, scheduled_at=scheduled_at):
+            if self.server.patroni.dcs.manual_failover(leader, candidate, scheduled_at=scheduled_at, site=site):
                 self.server.patroni.ha.wakeup()
                 if scheduled_at:
                     data = action.title() + ' scheduled'

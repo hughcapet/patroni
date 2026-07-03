@@ -756,20 +756,20 @@ class TestHa(PostgresInit):
 
         # to me
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', self.p.name, None))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', self.p.name, None, None))
             self.assertEqual(self.ha.run_cycle(), 'no action. I am (postgresql0), the leader with the lock')
             mock_warning.assert_called_with('%s: I am already the leader, no need to %s', 'manual failover', 'failover')
 
         # to a non-existent candidate
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', 'blabla', None))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', 'blabla', None, None))
             self.assertEqual(self.ha.run_cycle(), 'no action. I am (postgresql0), the leader with the lock')
             mock_warning.assert_called_with(
                 '%s: no healthy members found, %s is not possible', 'manual failover', 'failover')
 
         # to an existent candidate
         self.ha.fetch_node_status = get_node_status()
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', 'b', None))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', 'b', None, None))
         self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         self.assertEqual(self.ha.run_cycle(), 'manual failover: demoting myself')
 
@@ -797,13 +797,13 @@ class TestHa(PostgresInit):
 
         # different leader specified in failover key, no candidate
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, 'blabla', '', None))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, 'blabla', '', None, None))
             self.assertEqual(self.ha.run_cycle(), 'no action. I am (postgresql0), the leader with the lock')
             mock_warning.assert_called_with(
                 '%s: leader name does not match: %s != %s', 'switchover', 'blabla', 'postgresql0')
 
         # no candidate
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, '', None))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, '', None, None))
         self.assertEqual(self.ha.run_cycle(), 'switchover: demoting myself')
 
         self.ha._rewind.rewind_or_reinitialize_needed_and_possible = true
@@ -839,27 +839,27 @@ class TestHa(PostgresInit):
         # switchover scheduled time must include timezone
         with patch('patroni.ha.logger.warning') as mock_warning:
             scheduled = datetime.datetime.now()
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'blabla', scheduled))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'blabla', scheduled, None))
             self.assertEqual(self.ha.run_cycle(), 'no action. I am (postgresql0), the leader with the lock')
             self.assertIn('Incorrect value of scheduled_at: %s', mock_warning.call_args_list[0][0])
 
         # scheduled now
         scheduled = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=tzutc)
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'b', scheduled))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'b', scheduled, None))
         self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         self.assertEqual('switchover: demoting myself', self.ha.run_cycle())
 
         # scheduled in the future
         with patch('patroni.ha.logger.info') as mock_info:
             scheduled = scheduled + datetime.timedelta(seconds=30)
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'blabla', scheduled))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'blabla', scheduled, None))
             self.assertEqual('no action. I am (postgresql0), the leader with the lock', self.ha.run_cycle())
             self.assertIn('Awaiting %s at %s (in %.0f seconds)', mock_info.call_args_list[0][0])
 
         # stale value
         with patch('patroni.ha.logger.warning') as mock_warning:
             scheduled = scheduled + datetime.timedelta(seconds=-600)
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'b', scheduled))
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'b', scheduled, None))
             self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
             self.assertEqual('no action. I am (postgresql0), the leader with the lock', self.ha.run_cycle())
             self.assertIn('Found a stale %s value, cleaning up: %s', mock_warning.call_args_list[0][0])
@@ -869,7 +869,7 @@ class TestHa(PostgresInit):
         self.ha.is_paused = true
 
         # no candidate
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, '', None))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, '', None, None))
         with patch('patroni.ha.logger.warning') as mock_warning:
             self.assertEqual('PAUSE: no action. I am (postgresql0), the leader with the lock', self.ha.run_cycle())
             mock_warning.assert_called_with(
@@ -881,7 +881,7 @@ class TestHa(PostgresInit):
         self.ha.is_paused = true
 
         # failover from me, candidate is healthy
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, None, 'b', None))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, None, 'b', None, None))
         self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         self.assertEqual('PAUSE: manual failover: demoting myself', self.ha.run_cycle())
         self.ha.cluster.members.pop()
@@ -896,7 +896,8 @@ class TestHa(PostgresInit):
         self.ha.has_lock = true
 
         # the candidate is not in sync members but we allow failover to an async candidate
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, None, 'b', None), sync=(self.p.name, 'a'))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, None, 'b', None, None),
+                                                              sync=(self.p.name, 'a'))
         self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         self.assertEqual('manual failover: demoting myself', self.ha.run_cycle())
         self.ha.cluster.members.pop()
@@ -911,7 +912,7 @@ class TestHa(PostgresInit):
 
         # candidate specified is not in sync members
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'a', None),
+            self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'a', None, None),
                                                                   sync=(self.p.name, 'blabla'))
             self.assertEqual('no action. I am (postgresql0), the leader with the lock', self.ha.run_cycle())
             self.assertEqual(mock_warning.call_args_list[0][0],
@@ -919,7 +920,7 @@ class TestHa(PostgresInit):
 
         # the candidate is in sync members and is healthy
         self.ha.fetch_node_status = get_node_status(wal_position=305419896)
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'a', None),
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, self.p.name, 'a', None, None),
                                                               sync=(self.p.name, 'a'))
         self.ha.cluster.members.append(Member(0, 'a', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         self.assertEqual('switchover: demoting myself', self.ha.run_cycle())
@@ -936,7 +937,7 @@ class TestHa(PostgresInit):
 
         # failover to another member, fetch_node_status for candidate fails
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'leader', None))
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'leader', None, None))
             self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
             self.assertEqual(mock_warning.call_args_list[1][0],
                              ('%s: member %s is %s', 'manual failover', 'leader', 'not reachable'))
@@ -948,13 +949,13 @@ class TestHa(PostgresInit):
 
         # set nofailover flag to True for all members of the cluster
         # this should elect the current member, as we are not going to call the API for it.
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None, None))
         self.ha.fetch_node_status = get_node_status(nofailover=True)
         self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
 
         # failover to me but I am set to nofailover. In no case I should be elected as a leader
         self.p.set_role(PostgresqlRole.REPLICA)
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'postgresql0', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'postgresql0', None, None))
         self.ha.patroni.nofailover = True
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because I am not allowed to promote')
 
@@ -962,7 +963,7 @@ class TestHa(PostgresInit):
 
         # failover to another member that is on an older timeline (only failover_limitation() is checked)
         with patch('patroni.ha.logger.info') as mock_info:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'b', None))
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'b', None, None))
             self.ha.cluster.members.append(Member(0, 'b', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
             self.ha.fetch_node_status = get_node_status(timeline=1)
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
@@ -975,13 +976,17 @@ class TestHa(PostgresInit):
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
             mock_info.assert_called_with('%s: to %s, i am %s', 'manual failover', 'b', 'postgresql0')
 
+            # manual failover to a different site
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'dc2'))
+            self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
+
     def test_manual_switchover_process_no_leader(self):
         self.p.is_primary = false
         self.p.set_role(PostgresqlRole.REPLICA)
 
         # I was the leader, other members are healthy
         self.ha.fetch_node_status = get_node_status()
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, self.p.name, '', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, self.p.name, '', None, None))
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
 
         # I was the leader, I am the only healthy member
@@ -996,14 +1001,14 @@ class TestHa(PostgresInit):
         self.ha.fetch_node_status = get_node_status(nofailover=True)  # other nodes are not healthy
 
         # manual failover when our name (postgresql0) isn't in the /sync key and the candidate node is not available
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None),
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None, None),
                                                                  sync=('leader1', 'blabla'))
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
 
         # manual failover when the candidate node isn't available but our name is in the /sync key
         # while other sync node is nofailover
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None),
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None, None),
                                                                      sync=('leader1', 'postgresql0'))
             self.ha.dcs.write_sync_state = Mock(return_value=SyncState.empty())
             self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
@@ -1013,7 +1018,7 @@ class TestHa(PostgresInit):
         # manual failover to our node (postgresql0),
         # which name is not in sync nodes list (some sync nodes are available)
         self.p.set_role(PostgresqlRole.REPLICA)
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'postgresql0', None),
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'postgresql0', None, None),
                                                                  sync=('leader1', 'other'))
         self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
 
@@ -1022,21 +1027,27 @@ class TestHa(PostgresInit):
         self.p.is_primary = false
 
         # to a specific node, which name doesn't match our name (postgresql0)
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'other', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'other', None, None))
+        self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
+
+        # to my site, but my name is not in sync nodes list
+        self.ha.patroni.nofailover = False
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc1'))
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
 
         # to our node (postgresql0), which name is not in sync nodes list
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'postgresql0', None),
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'postgresql0',
+                                                                                   None, None),
                                                                  sync=('leader1', 'blabla'))
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
 
         # without candidate, our name (postgresql0) is not in the sync nodes list
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None),
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None, None),
                                                                  sync=('leader', 'blabla'))
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
 
         # switchover from a specific leader, but the only sync node (us, postgresql0) has nofailover tag
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None),
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None, None),
                                                                  sync=('postgresql0', None))
         self.ha.patroni.nofailover = True
         self.assertEqual(self.ha.run_cycle(), 'following a different leader because I am not allowed to promote')
@@ -1046,19 +1057,20 @@ class TestHa(PostgresInit):
 
         # I am running as primary, cluster is unlocked, the candidate is allowed to promote
         # but we are in pause
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', 'other', None, None))
         self.assertEqual(self.ha.run_cycle(), 'PAUSE: continue to run as primary without lock')
 
     def test_manual_switchover_process_no_leader_in_pause(self):
         self.ha.is_paused = true
 
         # I am running as primary, cluster is unlocked, no candidate specified
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', '', None, None))
         self.assertEqual(self.ha.run_cycle(), 'PAUSE: continue to run as primary without lock')
 
         # the candidate is not running
         with patch('patroni.ha.logger.warning') as mock_warning:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'blabla', None))
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', 'blabla',
+                                                                                       None, None))
             self.assertEqual('PAUSE: acquired session lock as a leader', self.ha.run_cycle())
             self.assertEqual(
                 mock_warning.call_args_list[0][0],
@@ -1067,7 +1079,15 @@ class TestHa(PostgresInit):
         # switchover to me, I am not leader
         self.p.is_primary = false
         self.p.set_role(PostgresqlRole.REPLICA)
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', self.p.name, None))
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', self.p.name,
+                                                                                   None, None))
+        self.assertEqual(self.ha.run_cycle(), 'PAUSE: promoted self to leader by acquiring session lock')
+
+        # to my site
+        self.p.is_primary = false
+        self.p.set_role(PostgresqlRole.REPLICA)
+        self.ha.patroni.site = 'dc2'
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc2'))
         self.assertEqual(self.ha.run_cycle(), 'PAUSE: promoted self to leader by acquiring session lock')
 
     def test_is_healthiest_node(self):
@@ -1153,6 +1173,11 @@ class TestHa(PostgresInit):
             self.assertFalse(self.ha._is_healthiest_node(self.ha.old_cluster.members))
             self.assertEqual(mock_info.call_args_list[0][0][0],
                              'Local failover in the current site %s is possible, while my site is %s')
+            # manual failover to a site
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, None, None, None, 'dc2'))
+            self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+            self.assertEqual(mock_info.call_args_list[0][0][0],
+                             'Local failover in the current site %s is possible, while my site is %s')
 
     def test_fetch_node_status(self):
         member = Member(0, 'test', 1, {'api_url': 'http://127.0.0.1:8011/patroni'})
@@ -1236,7 +1261,7 @@ class TestHa(PostgresInit):
         self.p.name = 'leader'
         self.ha.cluster = get_cluster_initialized_with_leader()
         self.assertEqual(self.ha.run_cycle(), 'PAUSE: removed leader lock because postgres is not running as primary')
-        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', self.p.name, None))
+        self.ha.cluster = get_cluster_initialized_with_leader(Failover(0, '', self.p.name, None, None))
         self.assertEqual(self.ha.run_cycle(), 'PAUSE: waiting to become primary after promote...')
 
     @patch('patroni.postgresql.mtime', Mock(return_value=1588316884))
@@ -1363,7 +1388,7 @@ class TestHa(PostgresInit):
     def test_manual_failover_while_starting(self):
         self.ha.has_lock = true
         self.p.check_for_startup = true
-        f = Failover(0, self.p.name, '', None)
+        f = Failover(0, self.p.name, '', None, None)
         self.ha.cluster = get_cluster_initialized_with_leader(f)
         self.ha.fetch_node_status = get_node_status()  # accessible, in_recovery
         self.assertEqual(self.ha.run_cycle(), 'switchover: demoting myself')
@@ -1960,7 +1985,7 @@ class TestHa(PostgresInit):
         self.p.set_role(PostgresqlRole.REPLICA)
         self.p.name = 'nonsync'
         self.ha.cluster = get_cluster_initialized_without_leader(sync=('other', 'postgresql0,foo'),
-                                                                 failover=Failover(0, None, self.p.name, None))
+                                                                 failover=Failover(0, None, self.p.name, None, None))
         self.ha.fetch_node_status = get_node_status()
         # Postgres 15, Non-sync node promoted manually. Our name is written to leader of the sync key.
         # Voters and synchronous_standby_names are set based on the old value of /sync key.
@@ -2119,7 +2144,7 @@ class TestHa(PostgresInit):
         self.p.name = 'leader'
         self.ha.fetch_node_status = get_node_status()
         self.ha.cluster = get_cluster_initialized_with_leader(sync=('leader', 'foo,other', 1),
-                                                              failover=Failover(0, 'leader', 'other', None))
+                                                              failover=Failover(0, 'leader', 'other', None, None))
         self.ha.cluster.members.append(Member(0, 'foo', 28, {'api_url': 'http://127.0.0.1:8011/patroni'}))
         # switchover when synchronous_mode = off
         self.assertTrue(self.ha.is_failover_possible())
@@ -2137,12 +2162,12 @@ class TestHa(PostgresInit):
                     self.assertTrue(self.ha.is_failover_possible(exclude_failover_candidate=True))
 
         self.ha.cluster = get_cluster_initialized_with_leader(sync=('leader', 'foo,other', 1),
-                                                              failover=Failover(0, '', 'foo', None))
+                                                              failover=Failover(0, '', 'foo', None, None))
         # failover to missing node foo
         self.assertFalse(self.ha.is_failover_possible())
 
         self.ha.cluster = get_cluster_initialized_with_leader(sync=('leader', 'foo,other', 1),
-                                                              failover=Failover(0, 'leader', '', None))
+                                                              failover=Failover(0, 'leader', '', None, None))
         # switchover from leader when synchronous_mode = off
         self.assertTrue(self.ha.is_failover_possible())
 
@@ -2152,3 +2177,6 @@ class TestHa(PostgresInit):
             with patch.object(global_config.__class__, 'is_quorum_commit_mode', PropertyMock(return_value=True)):
                 # switchover from leader when synchronous_mode = quorum
                 self.assertFalse(self.ha.is_failover_possible())  # failure, because quorum is low
+
+        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, None, None, None, 'dc2'))
+        self.assertFalse(self.ha.is_failover_possible())
