@@ -336,8 +336,8 @@ class Member(Tags, NamedTuple('Member',
         return parse_int(self.data.get('replay_lsn'))
 
     @property
-    def site(self) -> Optional[str]:
-        return self.data.get('site')
+    def site(self) -> str:
+        return str(self.data.get('site'))
 
 
 class RemoteMember(Member):
@@ -2017,9 +2017,9 @@ class AbstractDCS(abc.ABC):
 
         :param leader: value to set for ``leader``.
         :param candidate: value to set for ``member``.
+        :param site: value to set for ``site``.
         :param scheduled_at: value converted to ISO date format for ``scheduled_at``.
         :param version: for conditional update of the key/object.
-        :param site: value to set for ``site``.
 
         :returns: ``True`` if successfully committed to DCS.
         """

@@ -150,6 +150,11 @@ class TestCtl(unittest.TestCase):
                 self.assertIsNone(output_members(cluster, name='abc', site='foo', fmt='tsv'))
                 self.assertEqual(len(mock_echo.call_args_list), 1)
 
+                mock_echo.reset_mock()
+                cluster = get_cluster_initialized_with_leader(Failover(1, 'foo', None, scheduled_at, 'dc2'))
+                self.assertIsNone(output_members(cluster, name='abc'))
+                self.assertIn('to: site dc2', mock_echo.call_args_list[1][0][0])
+
     @patch('patroni.dcs.AbstractDCS.set_failover_value', Mock())
     def test_switchover(self):
         # Confirm
@@ -270,7 +275,11 @@ class TestCtl(unittest.TestCase):
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=cluster)):
             result = self.runner.invoke(ctl, ['switchover', 'dummy', '--group', '0', '--site', 'dc2'],
                                         input='leader\nother\n\ny')
-            print(result.output)
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn('demoting current leader leader in site dc1 and switching to site dc2', result.output)
+
+            result = self.runner.invoke(ctl, ['switchover', 'dummy', '--group', '0', '--site', 'dc2'],
+                                        input='leader\n\n\ny')
             self.assertEqual(result.exit_code, 0)
             self.assertIn('demoting current leader leader in site dc1 and switching to site dc2', result.output)
 

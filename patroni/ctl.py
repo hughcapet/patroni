@@ -1383,11 +1383,13 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
     # By now we have established that the leader exists and the candidate exists
     if not force:
         demote_msg = f', demoting current leader {cluster_leader}' if cluster_leader else ''
-        if cluster_leader and candidate:
-            current_site = cluster.status.current_site
+        current_site = cluster.status.current_site
+        if candidate:
             candidate_site = cast(Member, cluster.get_member(candidate, False)).site
-            if (current_site or candidate_site) and current_site != candidate_site:
-                demote_msg += f' in site {str(current_site)} and switching to site {str(candidate_site)}'
+            if current_site and current_site != candidate_site:
+                demote_msg += f' in site {current_site} and switching to site {candidate_site}'
+        elif site and current_site and site != current_site:
+            demote_msg += f' in site {current_site} and switching to site {site}'
         if scheduled_at_str:
             # only switchover can be scheduled
             if not click.confirm(f'Are you sure you want to schedule switchover of cluster '
