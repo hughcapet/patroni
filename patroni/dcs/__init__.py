@@ -972,17 +972,23 @@ class Cluster(NamedTuple('Cluster',
         return next((m for m in self.members if m.name == member_name),
                     self.leader if fallback_to_leader else None)
 
-    def get_clone_member(self, exclude_name: str) -> Union[Member, Leader, None]:
+    def get_clone_member(self, exclude_name: str, site: Optional[str] = None) -> Union[Member, Leader, None]:
         """Get member or leader object to use as clone source.
 
         :param exclude_name: name of a member name to exclude.
+        :param site: the site to which the clone member should belong.
 
         :returns: a randomly selected candidate member from available running members that are configured to as viable
                  sources for cloning (has tag ``clonefrom`` in configuration). If no member is appropriate the current
-                 leader is used.
+                 leader is used. If there is neither replica nor leader in the requested site, chose among all available
+                 members.
         """
         exclude = [exclude_name] + ([self.leader.name] if self.leader else [])
+
         candidates = [m for m in self.members if m.clonefrom and m.is_running and m.name not in exclude]
+        local_candidates = [m for m in candidates if (site is None or m.site == site)]
+        candidates = local_candidates if len(local_candidates) > 0 \
+            else [self.leader] if self.leader and self.leader.member.site == site else candidates
         return candidates[randint(0, len(candidates) - 1)] if candidates else self.leader
 
     @staticmethod
