@@ -373,7 +373,7 @@ END;$$""")
         # Ensure consistent sites order with sorting
         result: List[_Replica] = []
         remote_lists = [val for site, val in sorted(site_replicas.items()) if site not in (current_site, 'None')]
-        all_iters = remote_lists + [site_replicas[current_site], site_replicas['None']]
+        all_iters = remote_lists + [site_replicas.get(current_site, []), site_replicas['None']]
         result = [replica for vals in zip_longest(*all_iters) for replica in vals if replica is not None]
 
         return result

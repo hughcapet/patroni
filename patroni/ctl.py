@@ -1682,7 +1682,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
                           receive_lsn=receive_lsn, replay_lsn=replay_lsn,
                           pending_restart='*' if member.get('pending_restart') else '',
                           pending_restart_reason=restart_reason,
-                          site=str(member.get('site')))
+                          site=member.get('site', '') if member.get('site') != 'None' else '')
 
             if append_port and member['host'] and member.get('port'):
                 member['host'] = ':'.join([member['host'], str(member['port'])])

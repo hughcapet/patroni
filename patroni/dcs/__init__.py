@@ -788,6 +788,7 @@ class Status(NamedTuple):
     :ivar last_lsn: :class:`int` object containing position of last known leader LSN.
     :ivar slots: state of permanent replication slots on the primary in the format: ``{"slot_name": int}``.
     :ivar retain_slots: list physical replication slots for members that exist in the cluster.
+    :ivar current_site: the name of the site where leader is located.
     """
     last_lsn: int
     slots: Optional[Dict[str, int]]
@@ -972,7 +973,7 @@ class Cluster(NamedTuple('Cluster',
         return next((m for m in self.members if m.name == member_name),
                     self.leader if fallback_to_leader else None)
 
-    def get_clone_member(self, exclude_name: str, site: Optional[str] = None) -> Union[Member, Leader, None]:
+    def get_clone_member(self, exclude_name: str, site: Optional[str]) -> Union[Member, Leader, None]:
         """Get member or leader object to use as clone source.
 
         :param exclude_name: name of a member name to exclude.
@@ -988,7 +989,7 @@ class Cluster(NamedTuple('Cluster',
         candidates = [m for m in self.members if m.clonefrom and m.is_running and m.name not in exclude]
         local_candidates = [m for m in candidates if (site is None or m.site == site)]
         candidates = local_candidates if len(local_candidates) > 0 \
-            else [self.leader] if self.leader and self.leader.member.site == site else candidates
+            else [self.leader] if self.leader and (site is None or self.leader.member.site == site) else candidates
         return candidates[randint(0, len(candidates) - 1)] if candidates else self.leader
 
     @staticmethod
@@ -1966,7 +1967,7 @@ class AbstractDCS(abc.ABC):
         if ret and last_lsn:
             status: Dict[str, Any] = {self._OPTIME: last_lsn, 'slots': slots or None,
                                       'retain_slots': self._build_retain_slots(cluster, slots),
-                                      'current_site': str(site)}
+                                      'current_site': site}
             self.write_status(status)
 
         if ret and failsafe is not None:

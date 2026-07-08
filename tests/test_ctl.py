@@ -595,8 +595,8 @@ class TestCtl(unittest.TestCase):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
             assert '+\n| dc1  |     0 | leader          | 127.0.0.1:5435 | Leader  |' in result.output
             assert '|\n| dc1  |     0 | + other         | 127.0.0.1:5436 | Replica |' in result.output
-            assert '|\n| None |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
-            assert '|\n| None |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
+            assert '|\n|      |     0 |   + cascade     | 127.0.0.1:5437 | Replica |' in result.output
+            assert '|\n|      |     0 | + wrong_cascade | 127.0.0.1:5438 | Replica |' in result.output
 
         with patch('patroni.dcs.AbstractDCS.get_cluster', Mock(return_value=get_cluster_initialized_without_leader())):
             result = self.runner.invoke(ctl, ['topology', 'dummy'])
