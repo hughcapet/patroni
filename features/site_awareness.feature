@@ -43,7 +43,7 @@ Feature: site awareness
     Then "sync" key in DCS has sync_standby=postgres-1,postgres-4 after 10 seconds
     And synchronous_standby_names on postgres-3 is set to '2 ("postgres-1","postgres-4")' after 10 seconds
 
-  Scenario: test synchronous_cross_site local-only
+  Scenario: test synchronous_cross_site local_only
     When I issue a PATCH request to http://127.0.0.1:8011/config with {"synchronous_cross_site": "local_only"}
     Then "sync" key in DCS has sync_standby=postgres-2 after 10 seconds
     And synchronous_standby_names on postgres-3 is set to '"postgres-2"' after 10 seconds
@@ -59,7 +59,7 @@ Feature: site awareness
     Then "sync" key in DCS has sync_standby=None after 10 seconds
     And synchronous_standby_names on postgres-3 is set to '__patroni_strict_sync_replica_placeholder__' after 10 seconds
 
-  Scenario: test synchronous_cross_site remote-only
+  Scenario: test synchronous_cross_site remote_only
     When I issue a PATCH request to http://127.0.0.1:8011/config with {"synchronous_cross_site": "remote_only", "synchronous_mode_strict": "false"}
     Then "sync" key in DCS has sync_standby=postgres-1,postgres-4 after 10 seconds
     And synchronous_standby_names on postgres-3 is set to '2 ("postgres-1","postgres-4")' after 10 seconds
