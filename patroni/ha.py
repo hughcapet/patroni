@@ -452,9 +452,12 @@ class Ha(object):
                 'api_url': self.patroni.api.connection_string,
                 'state': self.state_handler.state,
                 'role': self.state_handler.role,
-                'version': self.patroni.version,
-                'site': str(self.patroni.site)
+                'version': self.patroni.version
             }
+
+            site = self.patroni.site
+            if site:
+                data['site'] = site
 
             proxy_url = self.state_handler.proxy_url
             if proxy_url:
@@ -1453,7 +1456,7 @@ class Ha(object):
                         eligible_members.append(st)
 
         if self.cluster.failover and self.cluster.failover.site:
-            eligible_members = [st for st in eligible_members if st.data.get('site') == self.cluster.failover.site]
+            eligible_members = [st for st in eligible_members if str(st.data.get('site')) == self.cluster.failover.site]
         elif current_site:
             current_site_eligible = [st for st in eligible_members if st.data.get('site') == current_site]
             if current_site_eligible and self.patroni.site != current_site:
@@ -1574,7 +1577,7 @@ class Ha(object):
             # at this point we should consider all members as a candidates for failover/switchover
             # i.e. we assume that failover.candidate is None
         elif failover.site:
-            if self.patroni.site != failover.site:
+            if str(self.patroni.site) != failover.site:
                 return False
 
             if self.is_synchronous_mode() and not self.is_quorum_commit_mode()\
@@ -2638,7 +2641,7 @@ class Ha(object):
             if self.sync_mode_is_active() and not self.cluster.sync.matches(node.name)\
                     and not (failover and not failover.leader):
                 return False
-            if failover and failover.site and node.data.get('site') != failover.site:
+            if failover and failover.site and str(node.data.get('site')) != failover.site:
                 return False
             # Don't spend time on "nofailover" nodes checking.
             # We also don't need nodes which we can't query with the api in the list.

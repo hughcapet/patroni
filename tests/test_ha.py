@@ -1041,9 +1041,16 @@ class TestHa(PostgresInit):
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
             mock_info.assert_called_with('%s: to %s, i am %s', 'manual failover', 'b', 'postgresql0')
 
-            # manual failover to a different site
+        # manual failover to a different site
+        with patch('patroni.ha.logger.info') as mock_info:
             self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'dc2'))
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
+
+        # manual failover to a special site 'None'
+        with patch('patroni.ha.logger.info') as mock_info:
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'None'))
+            self.ha.patroni.site = None
+            self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
 
     def test_manual_switchover_process_no_leader(self):
         self.p.is_primary = false

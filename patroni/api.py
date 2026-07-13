@@ -229,7 +229,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
             'name': patroni.postgresql.name
         }
 
-        response['site'] = str(patroni.site)
+        if patroni.site:
+            response['site'] = patroni.site
         if patroni.scheduled_restart:
             response['scheduled_restart'] = patroni.scheduled_restart.copy()
             del response['scheduled_restart']['postmaster_start_time']
@@ -1224,8 +1225,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
         cluster = self.server.patroni.dcs.get_cluster()
         config = global_config.from_cluster(cluster)
 
-        logger.info("received %s request with leader=%s candidate=%s scheduled_at=%s",
-                    action, leader, candidate, scheduled_at)
+        logger.info("received %s request with leader=%s candidate=%s site=%s scheduled_at=%s",
+                    action, leader, candidate, site, scheduled_at)
 
         if action == 'failover' and not candidate:
             data = 'Failover could be performed only to a specific candidate'

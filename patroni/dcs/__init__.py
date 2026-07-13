@@ -336,8 +336,8 @@ class Member(Tags, NamedTuple('Member',
         return parse_int(self.data.get('replay_lsn'))
 
     @property
-    def site(self) -> str:
-        return str(self.data.get('site'))
+    def site(self) -> Optional[str]:
+        return self.data.get('site')
 
 
 class RemoteMember(Member):

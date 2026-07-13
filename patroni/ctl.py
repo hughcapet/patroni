@@ -1378,7 +1378,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
     if site:
         failover_value['site'] = site
 
-    logging.debug(failover_value)
+    logging.warning(failover_value)
 
     # By now we have established that the leader exists and the candidate exists
     if not force:

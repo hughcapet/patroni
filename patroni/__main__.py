@@ -199,8 +199,8 @@ class Patroni(AbstractPatroniDaemon, Tags):
         return self._tags
 
     @property
-    def site(self) -> str:
-        return str(self.config.get('site'))
+    def site(self) -> Optional[str]:
+        return self.config.get('site')
 
     def schedule_next_run(self) -> None:
         """Schedule the next run of the ``patroni`` daemon main loop.
