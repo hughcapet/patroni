@@ -727,12 +727,32 @@ class TestRestApiHandler(unittest.TestCase):
             response_mock.assert_called_with(
                 422, 'Unable to parse scheduled timestamp. It should be in an unambiguous format, e.g. ISO 8601')
 
+        # [Multi-site switchover]
+        request = post + '53\n\n{"candidate": "postgresql1", "site": "dc1"}'
+        with patch.object(RestApiHandler, 'write_response') as response_mock:
+            MockRestApiServer(RestApiHandler, request)
+            response_mock.assert_called_with(400, 'Candidate and site options are mutually exclusive')
+
+        request = post + '53\n\n{"leader": "postgresql1", "site": "dc1"}'
+        with patch.object(RestApiHandler, 'write_response') as response_mock:
+            MockRestApiServer(RestApiHandler, request)
+            response_mock.assert_called_with(412, 'switchover is not possible: can not find members in site dc1')
+
+            cluster.members = [Member(0, 'postgresql0', 30, {'api_url': 'http', 'site': 'dc1'}),
+                               Member(0, 'postgresql2', 30, {'api_url': 'http'})]
+            cluster2.leader.name = 'postgresql0'
+            dcs.get_cluster.side_effect = [cluster, cluster2]
+            dcs.manual_failover.return_value = True
+            MockRestApiServer(RestApiHandler, request)
+            response_mock.assert_called_with(200, 'Successfully switched over to "postgresql0"')
+
     def test_do_POST_failover(self):
         post = 'POST /failover HTTP/1.0' + self._authorization + '\nContent-Length: '
 
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
-            response_mock.assert_called_once_with(400, 'Failover could be performed only to a specific candidate')
+            response_mock.assert_called_once_with(400,
+                                                  'Failover could be performed only to a specific candidate or site')
 
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '37\n\n{"candidate":"2","scheduled_at": "1"}')

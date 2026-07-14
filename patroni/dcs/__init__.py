@@ -988,8 +988,10 @@ class Cluster(NamedTuple('Cluster',
 
         candidates = [m for m in self.members if m.clonefrom and m.is_running and m.name not in exclude]
         local_candidates = [m for m in candidates if (site is None or m.site == site)]
-        candidates = local_candidates if len(local_candidates) > 0 \
-            else [self.leader] if self.leader and (site is None or self.leader.member.site == site) else candidates
+        if len(local_candidates) > 0:
+            candidates = local_candidates
+        elif self.leader and (site is None or self.leader.member.site == site):
+            candidates = [self.leader]
         return candidates[randint(0, len(candidates) - 1)] if candidates else self.leader
 
     @staticmethod

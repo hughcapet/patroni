@@ -1044,7 +1044,11 @@ class TestHa(PostgresInit):
         # manual failover to a different site
         with patch('patroni.ha.logger.info') as mock_info:
             self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'dc2'))
+            self.ha.cluster.members[1].data['site'] = 'dc2'
+            self.ha.fetch_node_status = get_node_status(site='dc2')
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
+            mock_info.assert_called_with('%s to the requested site %s is possible, while my site is %s',
+                                         'Manual failover', 'dc2', 'dc1')
 
         # manual failover to a special site 'None'
         with patch('patroni.ha.logger.info') as mock_info:
@@ -1066,6 +1070,13 @@ class TestHa(PostgresInit):
             self.ha.fetch_node_status = get_node_status(reachable=False)  # inaccessible, in_recovery
             self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
             self.assertEqual(mock_info.call_args_list[0][0][0::2], ('Member %s is %s', 'not reachable'))
+
+        # same but with no members in target failover site
+        with patch('patroni.ha.logger.info') as mock_info:
+            self.ha.fetch_node_status = get_node_status(reachable=False)
+            self.p.set_role(PostgresqlRole.REPLICA)
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, self.p.name, '', None, 'dc2'))
+            self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
 
     def test_manual_failover_process_no_leader_in_synchronous_mode(self):
         self.ha.is_synchronous_mode = true
@@ -1230,26 +1241,26 @@ class TestHa(PostgresInit):
              patch('patroni.postgresql.Postgresql.last_operation', return_value=12):
             # no up-to-date local memebers
             self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
-            self.assertEqual(mock_info.call_args_list[0][0][0],
-                             'No members in the curent site. Performing cross-site failover/switchover')
+            self.assertEqual(mock_info.call_args_list[0][0],
+                             ('No members in the curent site. Performing cross-site %s', 'failover'))
             mock_info.reset_mock()
             # local node with nofailover
             self.ha.fetch_node_status = get_node_status(wal_position=12, nofailover=True)
             self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
-            self.assertEqual(mock_info.call_args_list[0][0][0],
-                             'No members in the curent site. Performing cross-site failover/switchover')
+            self.assertEqual(mock_info.call_args_list[0][0],
+                             ('No members in the curent site. Performing cross-site %s', 'failover'))
             mock_info.reset_mock()
             # local failover possible (although my failover priority is higher)
             self.ha.patroni.failover_priority = 2
             self.ha.fetch_node_status = get_node_status(wal_position=12, failover_priority=1)
             self.assertFalse(self.ha._is_healthiest_node(self.ha.old_cluster.members))
-            self.assertEqual(mock_info.call_args_list[0][0][0],
-                             'Local failover in the current site %s is possible, while my site is %s')
+            self.assertEqual(mock_info.call_args_list[0][0],
+                             ('Local %s in the current site %s is possible, while my site is %s',
+                              'failover', 'dc1', 'dc2'))
             # manual failover to a site
+            mock_info.reset_mock()
             self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, None, None, None, 'dc2'))
             self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
-            self.assertEqual(mock_info.call_args_list[0][0][0],
-                             'Local failover in the current site %s is possible, while my site is %s')
 
     def test_fetch_node_status(self):
         member = Member(0, 'test', 1, {'api_url': 'http://127.0.0.1:8011/patroni'})
@@ -2249,6 +2260,3 @@ class TestHa(PostgresInit):
             with patch.object(global_config.__class__, 'is_quorum_commit_mode', PropertyMock(return_value=True)):
                 # switchover from leader when synchronous_mode = quorum
                 self.assertFalse(self.ha.is_failover_possible())  # failure, because quorum is low
-
-        self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, None, None, None, 'dc2'))
-        self.assertFalse(self.ha.is_failover_possible())

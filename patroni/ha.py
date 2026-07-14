@@ -1455,18 +1455,23 @@ class Ha(object):
                     if my_wal_position == st.wal_position:
                         eligible_members.append(st)
 
+        action = self._get_failover_action_name()
         if self.cluster.failover and self.cluster.failover.site:
             eligible_members = [st for st in eligible_members if str(st.data.get('site')) == self.cluster.failover.site]
+            if eligible_members and self.patroni.site != self.cluster.failover:
+                logger.info('%s to the requested site %s is possible, while my site is %s',
+                            action.capitalize(), self.cluster.failover.site, self.patroni.site)
+                return False
         elif current_site:
             current_site_eligible = [st for st in eligible_members if st.data.get('site') == current_site]
             if current_site_eligible and self.patroni.site != current_site:
-                logger.info('Local failover in the current site %s is possible, while my site is %s',
-                            current_site, self.patroni.site)
+                logger.info('Local %s in the current site %s is possible, while my site is %s',
+                            action, current_site, self.patroni.site)
                 return False
             elif self.patroni.site == current_site:
                 eligible_members = current_site_eligible
             else:
-                logger.info('No members in the curent site. Performing cross-site failover/switchover')
+                logger.info('No members in the curent site. Performing cross-site %s', action)
 
         for st in eligible_members:
             low_priority = my_wal_position == st.wal_position \
@@ -1577,9 +1582,8 @@ class Ha(object):
             # at this point we should consider all members as a candidates for failover/switchover
             # i.e. we assume that failover.candidate is None
         elif failover.site:
-            if str(self.patroni.site) != failover.site:
-                return False
-
+            # in synchronous mode (except quorum commit!) when our name is not in the
+            # /sync key we shouldn't take any action even if the candidate is unhealthy
             if self.is_synchronous_mode() and not self.is_quorum_commit_mode()\
                     and not self.cluster.sync.matches(self.state_handler.name, True):
                 return False
@@ -2640,8 +2644,6 @@ class Ha(object):
             # in synchronous mode we allow failover (not switchover!) to async node
             if self.sync_mode_is_active() and not self.cluster.sync.matches(node.name)\
                     and not (failover and not failover.leader):
-                return False
-            if failover and failover.site and str(node.data.get('site')) != failover.site:
                 return False
             # Don't spend time on "nofailover" nodes checking.
             # We also don't need nodes which we can't query with the api in the list.

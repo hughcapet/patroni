@@ -22,7 +22,7 @@ def start_patroni(context, name, site_name):
     start_patroni_tags(context, name, site_name, None, None)
 
 
-@then('{name: name} is in sync with primary after {timeout:d} seconds')
+@then('{name:name} is in sync with primary after {timeout:d} seconds')
 def replica_not_lagging(context, name, timeout):
     leader = context.dcs_ctl.query("leader")
     bound_time = time.time() + timeout

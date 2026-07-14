@@ -1152,12 +1152,13 @@ class RestApiHandler(BaseHTTPRequestHandler):
             action.title(), timeout * 2)
 
     def is_failover_possible(self, cluster: Cluster, leader: Optional[str], candidate: Optional[str],
-                             action: str) -> Optional[str]:
+                             site: Optional[str], action: str) -> Optional[str]:
         """Checks whether there are nodes that could take over after demoting the primary.
 
         :param cluster: the Patroni cluster.
         :param leader: name of the current Patroni leader.
         :param candidate: name of the Patroni node to be promoted.
+        :param site: name of the site to failover/switchover to.
         :param action: the action to be performed (``switchover`` or ``failover``).
 
         :returns: a string with the error message or ``None`` if good nodes are found.
@@ -1172,14 +1173,21 @@ class RestApiHandler(BaseHTTPRequestHandler):
             members = [m for m in cluster.members if m.name == candidate]
             if not members:
                 return 'candidate does not exists'
-        elif config.is_synchronous_mode and not config.is_quorum_commit_mode:
-            members = [m for m in cluster.members if cluster.sync.matches(m.name)]
-            if not members:
-                return action + ' is not possible: can not find sync_standby'
         else:
-            members = [m for m in cluster.members if not cluster.leader or m.name != cluster.leader.name and m.api_url]
-            if not members:
-                return action + ' is not possible: cluster does not have members except leader'
+            members = cluster.members
+            if site:
+                members = [m for m in cluster.members if str(m.site) == site]
+                if not members:
+                    return action + ' is not possible: can not find members in site ' + site
+            if config.is_synchronous_mode and not config.is_quorum_commit_mode:
+                members = [m for m in members if cluster.sync.matches(m.name)]
+                if not members:
+                    return action + ' is not possible: can not find sync_standby'
+            else:
+                members = [m for m in members if not cluster.leader or m.name != cluster.leader.name and m.api_url]
+                if not members:
+                    return action + ' is not possible: cluster does not have members except leader'
+
         for st in self.server.patroni.ha.fetch_nodes_statuses(members):
             if st.failover_limitation() is None:
                 return None
@@ -1228,10 +1236,13 @@ class RestApiHandler(BaseHTTPRequestHandler):
         logger.info("received %s request with leader=%s candidate=%s site=%s scheduled_at=%s",
                     action, leader, candidate, site, scheduled_at)
 
-        if action == 'failover' and not candidate:
-            data = 'Failover could be performed only to a specific candidate'
+        if action == 'failover' and not candidate and not site:
+            data = 'Failover could be performed only to a specific candidate or site'
         elif action == 'switchover' and not leader:
             data = 'Switchover could be performed only from a specific leader'
+
+        if site and candidate:
+            data = 'Candidate and site options are mutually exclusive'
 
         if not data and scheduled_at:
             if action == 'failover':
@@ -1248,11 +1259,11 @@ class RestApiHandler(BaseHTTPRequestHandler):
             logger.warning('received failover request with leader specified - performing switchover instead')
             action = 'switchover'
 
-        if not data and leader == candidate:
+        if not data and leader and candidate and leader == candidate:
             data = 'Switchover target and source are the same'
 
         if not data and not scheduled_at:
-            data = self.is_failover_possible(cluster, leader, candidate, action)
+            data = self.is_failover_possible(cluster, leader, candidate, site, action)
             if data:
                 status_code = 412
 
