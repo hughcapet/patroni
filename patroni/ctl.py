@@ -1378,9 +1378,8 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
     if site:
         failover_value['site'] = site
 
-    logging.warning(failover_value)
+    logging.debug(failover_value)
 
-    # By now we have established that the leader exists and the candidate exists
     if not force:
         demote_msg = f', demoting current leader {cluster_leader}' if cluster_leader else ''
         current_site = cluster.status.current_site
@@ -1617,6 +1616,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         ``topology`` nor ``pretty``, then complementary information gathered through :func:`get_cluster_service_info` is
         not printed.
     :param group: filter which Citus group we should get members from. If ``None`` get from all groups.
+    :param site: filter which site of the cluster we should get members from.  If ``None`` get from all sites.
     """
     rows: List[List[Any]] = []
     logging.debug(cluster)
