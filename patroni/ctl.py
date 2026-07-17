@@ -1344,8 +1344,9 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         if candidate == cluster_leader:
             raise PatroniCtlException(
                 f'Member {candidate} is already the leader of cluster {cluster_name}')
+        location = f'site {site}' if site else f'cluster {cluster_name}'
         raise PatroniCtlException(
-            f'Member {candidate} does not exist in cluster {cluster_name} or is tagged as nofailover')
+            f'Member {candidate} does not exist in {location} or is tagged as nofailover')
 
     if all((not force,
             action == 'failover',
