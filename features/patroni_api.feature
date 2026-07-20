@@ -27,7 +27,7 @@ Scenario: check API requests on a stand-alone server
 	Then I receive a response code 400
 	When I issue a POST request to http://127.0.0.1:8008/failover with {"foo": "bar"}
 	Then I receive a response code 400
-	And I receive a response text "Failover could be performed only to a specific candidate or site"
+	And I receive a response text "Failover could be performed only to a specific candidate"
 
 Scenario: check local configuration reload
 	Given I add tag new_tag new_value to postgres-0 config

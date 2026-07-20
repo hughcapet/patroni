@@ -290,8 +290,9 @@ class TestCtl(unittest.TestCase):
         self.assertIn('Failover could be performed only to a specific candidate', result.output)
 
         # Site specified
-        result = self.runner.invoke(ctl, ['failover', 'dummy', '--site', 'dc1', '--group', '0'])
-        self.assertIn('Failover could be performed only to a specific candidate', result.output)
+        with patch('patroni.ctl.request_patroni') as mock_request:
+            result = self.runner.invoke(ctl, ['failover', 'dummy', '--site', 'dc1', '--group', '0'], input='other\ny')
+            self.assertNotIn('site', mock_request.call_args_list[0][0][3])
 
         # Candidate is the same as the leader
         result = self.runner.invoke(ctl, ['failover', 'dummy', '--group', '0'], input='leader\n')

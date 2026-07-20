@@ -1458,7 +1458,7 @@ class Ha(object):
         action = self._get_failover_action_name()
         if self.cluster.failover and self.cluster.failover.site:
             eligible_members = [st for st in eligible_members if str(st.data.get('site')) == self.cluster.failover.site]
-            if eligible_members and self.patroni.site != self.cluster.failover:
+            if eligible_members and self.patroni.site != self.cluster.failover.site:
                 logger.info('%s to the requested site %s is possible, while my site is %s',
                             action.capitalize(), self.cluster.failover.site, self.patroni.site)
                 return False

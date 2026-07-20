@@ -1378,7 +1378,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         failover_value['leader'] = switchover_leader
     if scheduled_at_str:
         failover_value['scheduled_at'] = scheduled_at_str
-    if site:
+    if site and action != 'failover':
         failover_value['site'] = site
 
     logging.debug(failover_value)

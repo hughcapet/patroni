@@ -1041,18 +1041,18 @@ class TestHa(PostgresInit):
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
             mock_info.assert_called_with('%s: to %s, i am %s', 'manual failover', 'b', 'postgresql0')
 
-        # manual failover to a different site
+        # manual switchover to a different site
         with patch('patroni.ha.logger.info') as mock_info:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'dc2'))
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc2'))
             self.ha.cluster.members[1].data['site'] = 'dc2'
             self.ha.fetch_node_status = get_node_status(site='dc2')
             self.assertEqual(self.ha.run_cycle(), 'following a different leader because i am not the healthiest node')
             mock_info.assert_called_with('%s to the requested site %s is possible, while my site is %s',
-                                         'Manual failover', 'dc2', 'dc1')
+                                         'Switchover', 'dc2', 'dc1')
 
-        # manual failover to a special site 'None'
+        # manual switchover to a special site 'None'
         with patch('patroni.ha.logger.info') as mock_info:
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, '', None, None, 'None'))
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'None'))
             self.ha.patroni.site = None
             self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
 
@@ -1236,9 +1236,14 @@ class TestHa(PostgresInit):
         self.ha.patroni.failover_priority = 0
         self.assertFalse(self.ha._is_healthiest_node(self.ha.old_cluster.members))
         # multisite
-        self.ha.patroni.site = 'dc2'
         with patch('patroni.ha.logger.info') as mock_info, \
              patch('patroni.postgresql.Postgresql.last_operation', return_value=12):
+            # local failover to my site
+            self.ha.fetch_node_status = get_node_status(wal_position=12, nofailover=True)
+            self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
+            mock_info.reset_mock()
+
+            self.ha.patroni.site = 'dc2'
             # no up-to-date local memebers
             self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
             self.assertEqual(mock_info.call_args_list[0][0],
@@ -1257,9 +1262,10 @@ class TestHa(PostgresInit):
             self.assertEqual(mock_info.call_args_list[0][0],
                              ('Local %s in the current site %s is possible, while my site is %s',
                               'failover', 'dc1', 'dc2'))
-            # manual failover to a site
+            # manual switchover to a site
             mock_info.reset_mock()
-            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, None, None, None, 'dc2'))
+            self.ha.fetch_node_status = get_node_status(wal_position=12, site='dc2')
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc2'))
             self.assertTrue(self.ha._is_healthiest_node(self.ha.old_cluster.members))
 
     def test_fetch_node_status(self):
