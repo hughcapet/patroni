@@ -728,11 +728,14 @@ class TestRestApiHandler(unittest.TestCase):
                 422, 'Unable to parse scheduled timestamp. It should be in an unambiguous format, e.g. ISO 8601')
 
         # [Multi-site switchover]
-        request = post + '53\n\n{"candidate": "postgresql1", "site": "dc1"}'
+
+        # site and candidate
+        request = post + '114\n\n{"leader": "postgresql1", "candidate": "postgresql2", "site": "dc1"}'
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, request)
-            response_mock.assert_called_with(400, 'Candidate and site options are mutually exclusive')
+            dcs.manual_failover.assert_called_with('postgresql1', 'postgresql2', scheduled_at=None, site=None)
 
+        # no members in site
         request = post + '53\n\n{"leader": "postgresql1", "site": "dc1"}'
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, request)
@@ -752,7 +755,7 @@ class TestRestApiHandler(unittest.TestCase):
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
             response_mock.assert_called_once_with(400,
-                                                  'Failover could be performed only to a specific candidate or site')
+                                                  'Failover could be performed only to a specific candidate')
 
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '37\n\n{"candidate":"2","scheduled_at": "1"}')

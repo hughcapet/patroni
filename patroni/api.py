@@ -1229,20 +1229,17 @@ class RestApiHandler(BaseHTTPRequestHandler):
         leader = request.get('leader')
         candidate = request.get('candidate') or request.get('member')
         scheduled_at = request.get('scheduled_at')
-        site = request.get('site')
+        site = request.get('site') if not candidate else None
         cluster = self.server.patroni.dcs.get_cluster()
         config = global_config.from_cluster(cluster)
 
         logger.info("received %s request with leader=%s candidate=%s site=%s scheduled_at=%s",
                     action, leader, candidate, site, scheduled_at)
 
-        if action == 'failover' and not candidate and not site:
-            data = 'Failover could be performed only to a specific candidate or site'
+        if action == 'failover' and not candidate:
+            data = 'Failover could be performed only to a specific candidate'
         elif action == 'switchover' and not leader:
             data = 'Switchover could be performed only from a specific leader'
-
-        if site and candidate:
-            data = 'Candidate and site options are mutually exclusive'
 
         if not data and scheduled_at:
             if action == 'failover':

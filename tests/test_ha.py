@@ -1171,7 +1171,7 @@ class TestHa(PostgresInit):
         self.p.set_role(PostgresqlRole.REPLICA)
         self.ha.patroni.site = 'dc2'
         self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc2'))
-        self.assertEqual(self.ha.run_cycle(), 'PAUSE: promoted self to leader by acquiring session lock')
+        self.assertEqual(self.ha.run_cycle(), 'PAUSE: no action. I am (postgresql0)')
 
     def test_is_healthiest_node(self):
         self.ha.is_failsafe_mode = true

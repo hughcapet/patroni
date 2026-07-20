@@ -73,6 +73,7 @@ class Patroni(AbstractPatroniDaemon, Tags):
         super(Patroni, self).__init__(config, patroni_logger)
 
         self.version = __version__
+        self._site = self.config.get('site')
         self.dcs = get_dcs(self.config)
         self.request = PatroniRequest(self.config, True)
 
@@ -200,7 +201,8 @@ class Patroni(AbstractPatroniDaemon, Tags):
 
     @property
     def site(self) -> Optional[str]:
-        return self.config.get('site')
+        """Site configured for this node, if any."""
+        return self._site
 
     def schedule_next_run(self) -> None:
         """Schedule the next run of the ``patroni`` daemon main loop.

@@ -1276,6 +1276,8 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
     :raises:
         :class:`PatroniCtlException`: if:
             * both *candidate* and *site* are provided; or
+            * *site* is provided for a failover; or
+            * *site* is provided for a switchover in pause; or
             * Patroni is running on a Citus cluster, but no *group* was specified; or
             * a switchover was requested by the cluster has no leader; or
             * *switchover_leader* does not match the current leader of the cluster; or
@@ -1344,7 +1346,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         if candidate == cluster_leader:
             raise PatroniCtlException(
                 f'Member {candidate} is already the leader of cluster {cluster_name}')
-        location = f'site {site}' if site else f'cluster {cluster_name}'
+        location = f'site {site} of cluster {cluster_name}' if site else f'cluster {cluster_name}'
         raise PatroniCtlException(
             f'Member {candidate} does not exist in {location} or is tagged as nofailover')
 

@@ -289,6 +289,10 @@ class TestCtl(unittest.TestCase):
         result = self.runner.invoke(ctl, ['failover', 'dummy'], input='0\n\n')
         self.assertIn('Failover could be performed only to a specific candidate', result.output)
 
+        # Site specified
+        result = self.runner.invoke(ctl, ['failover', 'dummy', '--site', 'dc1', '--group', '0'])
+        self.assertIn('Failover could be performed only to a specific candidate', result.output)
+
         # Candidate is the same as the leader
         result = self.runner.invoke(ctl, ['failover', 'dummy', '--group', '0'], input='leader\n')
         self.assertIn("Candidate ['other']", result.output)

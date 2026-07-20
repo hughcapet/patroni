@@ -1581,14 +1581,14 @@ class Ha(object):
 
             # at this point we should consider all members as a candidates for failover/switchover
             # i.e. we assume that failover.candidate is None
+        elif self.is_paused():
+            return False
         elif failover.site:
             # in synchronous mode (except quorum commit!) when our name is not in the
             # /sync key we shouldn't take any action even if the candidate is unhealthy
             if self.is_synchronous_mode() and not self.is_quorum_commit_mode()\
                     and not self.cluster.sync.matches(self.state_handler.name, True):
                 return False
-        elif self.is_paused():
-            return False
 
         # try to pick some other members for switchover and check that they are healthy
         if failover.leader:
@@ -1937,7 +1937,7 @@ class Ha(object):
             # When we are doing manual failover there is no guaranty that new leader is ahead of any other node.
             # Node tagged as nofailover can be also ahead of the new leader, but it is always excluded from elections
             # and therefore we trigger rewind checks on it, but only if not in pause, because there is no race in pause.
-            if self.cluster.failover and (self.cluster.failover.candidate or self.cluster.failover.site) or \
+            if self.cluster.failover and self.cluster.failover.candidate or \
                     self.patroni.nofailover and not self.is_paused():
                 self._rewind.trigger_check_diverged_lsn()
                 time.sleep(2)  # Give a time to somebody to take the leader lock
