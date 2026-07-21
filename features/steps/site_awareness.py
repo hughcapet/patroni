@@ -7,12 +7,15 @@ from behave import step, then
       'sync priority {sync_priority:d}')
 def start_patroni_tags(context, name, site_name, failover_priority, sync_priority):
     config = {
-        "site": site_name
+        "site": site_name,
+        "tags": {
+            "clonefrom": True
+        }
     }
     if failover_priority is not None:
-        config["tags"] = {"failover_priority": failover_priority}
+        config["tags"]["failover_priority"] = failover_priority
     if sync_priority is not None:
-        config.setdefault("tags", {})["sync_priority"] = sync_priority
+        config["tags"]["sync_priority"] = sync_priority
 
     return context.pctl.start(name, custom_config=config)
 
