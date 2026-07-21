@@ -1446,7 +1446,6 @@ class Ha(object):
                     if not self.sync_mode_is_active() or not self.cluster.sync.leader_matches(st.member.name):
                         return False
                     logger.info('Ignoring the former leader being ahead of us')
-                    eligible_members.append(st)
                 elif st.wal_position > 0:  # we want to count votes only from nodes with postgres up and running!
                     quorum_vote = st.member.name in voting_set
                     if quorum_vote:
