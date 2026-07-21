@@ -1176,7 +1176,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         else:
             members = cluster.members
             if site:
-                members = [m for m in cluster.members if str(m.site) == site]
+                members = [m for m in cluster.members if m.site == site]
                 if not members:
                     return action + ' is not possible: can not find members in site ' + site
             if config.is_synchronous_mode and not config.is_quorum_commit_mode:

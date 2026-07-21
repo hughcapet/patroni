@@ -1323,11 +1323,11 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         if cluster_leader != switchover_leader:
             raise PatroniCtlException(f'Member {switchover_leader} is not the leader of cluster {cluster_name}')
 
-    site_names = set(str(m.site)for m in cluster.members)
+    site_names = set(m.site for m in cluster.members if m.site)
     if site and site not in site_names:
         raise PatroniCtlException(f'Site {site} does not exist in cluster {cluster_name}')
 
-    candidates = [m for m in cluster.members if str(m.site) == site] if site else cluster.members
+    candidates = [m for m in cluster.members if m.site == site] if site else cluster.members
     # excluding members with nofailover tag
     candidate_names = [str(m.name) for m in candidates if m.name != cluster_leader and not m.nofailover]
     # We sort the names for consistent output to the client
@@ -1388,7 +1388,7 @@ def _do_failover_or_switchover(action: str, cluster_name: str, group: Optional[i
         current_site = cluster.status.current_site
         if candidate:
             candidate_site = cast(Member, cluster.get_member(candidate, False)).site
-            if current_site and current_site != candidate_site:
+            if current_site and candidate_site and current_site != candidate_site:
                 demote_msg += f' in site {current_site} and switching to site {candidate_site}'
         elif site and current_site and site != current_site:
             demote_msg += f' in site {current_site} and switching to site {site}'
@@ -1592,6 +1592,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
     Information is printed to console through :func:`print_output`, and contains:
 
         * ``Cluster``: name of the Patroni cluster, as per ``scope`` configuration;
+        * ``Site``: site of the Patroni node, as per ``site`` configuration;
         * ``Member``: name of the Patroni node, as per ``name`` configuration;
         * ``Host``: hostname (or IP) and port, as per ``postgresql.listen`` configuration;
         * ``Role``: ``Leader``, ``Standby Leader``, ``Sync Standby`` or ``Replica``;
@@ -1641,7 +1642,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         if extended or any(m.get(c.lower().replace(' ', '_')) for m in all_members):
             columns.append(c)
 
-    cluster_sites = set(str(m.get('site')) for m in all_members)
+    cluster_sites = set(m.get('site') for m in all_members)
     if len(cluster_sites) > 1:
         columns.insert(1, 'Site')
 
@@ -1685,7 +1686,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
                           receive_lsn=receive_lsn, replay_lsn=replay_lsn,
                           pending_restart='*' if member.get('pending_restart') else '',
                           pending_restart_reason=restart_reason,
-                          site=member.get('site', '') if member.get('site') != 'None' else '')
+                          site=member.get('site', ''))
 
             if append_port and member['host'] and member.get('port'):
                 member['host'] = ':'.join([member['host'], str(member['port'])])
@@ -1705,7 +1706,7 @@ def output_members(cluster: Cluster, name: str, extended: bool = False,
         title = 'Cluster'
         title_details = f' ({initialize})'
 
-    site = len(cluster_sites) == 1 and list(cluster_sites)[0] != 'None' and ' Site: ' + list(cluster_sites)[0] or ''
+    site = len(cluster_sites) == 1 and list(cluster_sites)[0] and ' Site: ' + list(cluster_sites)[0] or ''
     title = f' {title}: {name}{title_details}{site} '
     if fmt in ('pretty', 'topology'):
         columns[columns.index('Replay Lag')] = columns[columns.index('Receive Lag')] = 'Lag'

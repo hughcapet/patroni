@@ -558,8 +558,7 @@ class Ha(object):
             else:
                 return 'failed to acquire initialize lock'
 
-        clone_member = self.cluster.get_clone_member(self.state_handler.name,
-                                                     self.patroni.site if self.cluster.status.current_site else None)
+        clone_member = self.cluster.get_clone_member(self.state_handler.name, self.patroni.site)
         # cluster already has a leader, we can bootstrap from it or from one of replicas (if they allow)
         if not self.cluster.is_unlocked() and clone_member:
             member_role = 'leader' if clone_member == self.cluster.leader else 'replica'
@@ -1456,7 +1455,7 @@ class Ha(object):
 
         action = self._get_failover_action_name()
         if self.cluster.failover and self.cluster.failover.site:
-            eligible_members = [st for st in eligible_members if str(st.data.get('site')) == self.cluster.failover.site]
+            eligible_members = [st for st in eligible_members if st.data.get('site') == self.cluster.failover.site]
             if eligible_members and self.patroni.site != self.cluster.failover.site:
                 logger.info('%s to the requested site %s is possible, while my site is %s',
                             action.capitalize(), self.cluster.failover.site, self.patroni.site)
@@ -2126,8 +2125,7 @@ class Ha(object):
         if from_leader:
             clone_member = cluster.leader
         else:
-            clone_member = cluster.get_clone_member(
-                self.state_handler.name, self.patroni.site if cluster.status.current_site else None)
+            clone_member = cluster.get_clone_member(self.state_handler.name, self.patroni.site)
 
         if clone_member:
             member_role = 'leader' if clone_member == cluster.leader else 'replica'

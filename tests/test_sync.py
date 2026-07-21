@@ -291,18 +291,23 @@ class TestSync(BaseTestPostgresql):
         # balanced
         onemore = Member(0, 'onemore', 28, {'conn_url': 'postgres://replicator:rep-pass@127.0.0.1:5433/postgres',
                                             'state': PostgresqlState.RUNNING, 'site': 'dc3'})
-        pg_stat_replication.append({'pid': 103, 'application_name': onemore.name, 'sync_state': 'async',
-                                    'flush_lsn': 1, 'replay_lsn': 1})
+        nosite = Member(0, 'nosite', 28, {'conn_url': 'postgres://replicator:rep-pass@127.0.0.1:5433/postgres',
+                                          'state': PostgresqlState.RUNNING})
+        pg_stat_replication += [
+            {'pid': 103, 'application_name': onemore.name, 'sync_state': 'async', 'flush_lsn': 1, 'replay_lsn': 1},
+            {'pid': 104, 'application_name': nosite.name, 'sync_state': 'async', 'flush_lsn': 1, 'replay_lsn': 1}
+        ]
         config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'balanced',
-                                   'synchronous_node_count': 2}, 1)
-        cluster = Cluster(True, config, leader, Status.empty(), [me, one, another, yetanother, onemore], None,
+                                   'synchronous_node_count': 4}, 1)
+        cluster = Cluster(True, config, leader, Status.empty(), [me, one, another, yetanother, onemore, nosite], None,
                           SyncState(0, me.name, None, 0, SyncCrossSiteMode.LOCAL_ONLY), None, None, None)
         global_config.update(cluster)
 
         with patch.object(Postgresql, "_cluster_info_state_get",
                           side_effect=['', 'remote_apply', pg_stat_replication]):
             self.assertEqual(self.s.current_state(cluster), ('off', 0, CaseInsensitiveSet(), CaseInsensitiveSet(),
-                                                             CaseInsensitiveSet([another.name, onemore.name])))
+                                                             CaseInsensitiveSet([another.name, onemore.name,
+                                                                                 yetanother.name, one.name])))
 
         # any
         config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'any',
