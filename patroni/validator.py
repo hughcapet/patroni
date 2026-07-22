@@ -988,6 +988,18 @@ def validate_name(value: Any) -> None:
         raise ConfigParseError(f"Node 'name' can't be set to '{SYNC_STRICT_PLACEHOLDER}'")
 
 
+def validate_site(value: Any) -> None:
+    """Validate ``site`` configuration option.
+
+    :param value: value of ``site`` to be validated.
+
+    :raises:
+        :class:`~patroni.exceptions.ConfigParseError` if value is an empty string.
+    """
+    if not value:
+        raise ConfigParseError("Site value can't be empty")
+
+
 userattributes = {"username": "", Optional("password"): ""}
 available_dcs = [m.split(".")[-1] for m in dcs_modules()]
 setattr(validate_host_port_list, 'expected_type', list)
@@ -998,6 +1010,7 @@ setattr(validate_host_port_listen_multiple_hosts, 'expected_type', str)
 setattr(validate_data_dir, 'expected_type', str)
 setattr(validate_binary_name, 'expected_type', str)
 setattr(validate_name, 'expected_type', str)
+setattr(validate_site, 'expected_type', str)
 setattr(validate_sync_cross_site, 'expected_type', str)
 validate_etcd = {
     Or("host", "hosts", "srv", "srv_suffix", "url", "proxy"): Case({
@@ -1019,7 +1032,7 @@ validate_etcd = {
 schema = Schema({
     "name": validate_name,
     "scope": str,
-    Optional("site"): str,
+    Optional("site"): validate_site,
     Optional("thread_pool_size"): IntValidator(min=5, expected_type=int, raise_assert=True),
     Optional("thread_stack_size"): IntValidator(min=65536, base_unit='B', aligned=65535,
                                                 expected_type=int, raise_assert=True),

@@ -1055,11 +1055,16 @@ class TestHa(PostgresInit):
             mock_info.assert_called_with('%s to the requested site %s is possible, while my site is %s',
                                          'Switchover', 'dc2', 'dc1')
 
+        # manual switchover to my site
+        with patch('patroni.ha.logger.info') as mock_info:
+            self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'dc1'))
+            self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
+
         # manual switchover to a special site 'None'
         with patch('patroni.ha.logger.info') as mock_info:
             self.ha.cluster = get_cluster_initialized_without_leader(failover=Failover(0, 'leader', None, None, 'None'))
             self.ha.patroni.site = None
-            self.assertEqual(self.ha.run_cycle(), 'promoted self to leader by acquiring session lock')
+            self.assertEqual(self.ha.run_cycle(), 'acquired session lock as a leader')
 
     def test_manual_switchover_process_no_leader(self):
         self.p.is_primary = false

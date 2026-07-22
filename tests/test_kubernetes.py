@@ -422,7 +422,7 @@ class TestKubernetesEndpointsNoPodIP(BaseTestKubernetes):
 
     @patch.object(k8s_client.CoreV1Api, 'patch_namespaced_endpoints', create=True)
     def test_update_leader(self, mock_patch_namespaced_endpoints):
-        self.assertIsNotNone(self.k.update_leader(self.k.get_cluster(), '123', failsafe={'foo': 'bar'}, site='dc1'))
+        self.assertIsNotNone(self.k.update_leader(self.k.get_cluster(), '123', failsafe={'foo': 'bar'}))
         args = mock_patch_namespaced_endpoints.call_args[0]
         self.assertEqual(args[2].subsets[0].addresses[0].target_ref.resource_version, '1')
         self.assertEqual(args[2].subsets[0].addresses[0].ip, '10.0.0.1')
