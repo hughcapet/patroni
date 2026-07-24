@@ -220,8 +220,8 @@ class TestCtl(unittest.TestCase):
 
         # Errors while sending Patroni REST API request
         with patch('patroni.ctl.request_patroni', Mock(side_effect=Exception)):
-            result = self.runner.invoke(ctl, ['switchover', 'dummy', '--group', '0'],
-                                        input='leader\nother\n2300-01-01T12:23:00\ny')
+            result = self.runner.invoke(ctl, ['switchover', 'dummy', '--group', '0', '--site', 'dc1'],
+                                        input='leader\n\n2300-01-01T12:23:00\ny')
             self.assertIn('falling back to DCS', result.output)
 
         with patch('patroni.ctl.request_patroni') as mock_api_request:

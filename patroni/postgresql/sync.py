@@ -297,14 +297,13 @@ class SyncHandler(object):
     and the `current_state()` method will count newly added names as "sync" only when
     they reached memorized LSN and also reported as "sync" by `pg_stat_replication`"""
 
-    def __init__(self, postgresql: 'Postgresql', site: Optional[str]) -> None:
+    def __init__(self, postgresql: 'Postgresql') -> None:
         self._postgresql = postgresql
         self._synchronous_standby_names = ''  # last known value of synchronous_standby_names
         self._ssn_data = deepcopy(_EMPTY_SSN)
         self._primary_flush_lsn = 0
         # "sync" replication connections, that were verified to reach self._primary_flush_lsn at some point
         self._ready_replicas = CaseInsensitiveDict({})  # keys: member names, values: connection pids
-        self.site = site
 
     def _handle_synchronous_standby_names_change(self) -> None:
         """Handles changes of "synchronous_standby_names" GUC.
@@ -412,12 +411,13 @@ END;$$""")
         sorted_replicas = sorted(replica_list, key=lambda x: x.nofailover)
         cross_site_mode = global_config.sync_cross_site_mode
 
-        if self.site:
-            current_site_replicas: List[_Replica] = [r for r in sorted_replicas if r.site == self.site]
-            remote_replicas: List[_Replica] = [r for r in sorted_replicas if r.site != self.site]
+        site = self._postgresql.site
+        if site:
+            current_site_replicas: List[_Replica] = [r for r in sorted_replicas if r.site == site]
+            remote_replicas: List[_Replica] = [r for r in sorted_replicas if r.site != site]
 
             if cross_site_mode == SyncCrossSiteMode.BALANCED:
-                selection_order = self.pick_replicas_site_balanced(self.site, sorted_replicas)
+                selection_order = self.pick_replicas_site_balanced(site, sorted_replicas)
             elif cross_site_mode != SyncCrossSiteMode.ANY:
                 if cross_site_mode in (SyncCrossSiteMode.REMOTE_ONLY, SyncCrossSiteMode.PREFER_REMOTE):
                     selection_order = remote_replicas

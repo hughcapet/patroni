@@ -230,7 +230,7 @@ class TestSync(BaseTestPostgresql):
             {'pid': 101, 'application_name': another.name, 'sync_state': 'async', 'flush_lsn': 1, 'replay_lsn': 1},
             {'pid': 102, 'application_name': one.name, 'sync_state': 'async', 'flush_lsn': 1, 'replay_lsn': 1}]
 
-        self.s.site = 'dc1'
+        self.s._postgresql._site = 'dc1'
 
         # local_only
         config = ClusterConfig(1, {'synchronous_mode': True, 'synchronous_cross_site': 'local_only',
