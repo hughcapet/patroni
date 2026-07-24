@@ -16,7 +16,8 @@ from .dcs import dcs_modules
 from .exceptions import ConfigParseError, PatroniAssertionError
 from .log import type_logformat
 from .postgresql.sync import SYNC_STRICT_PLACEHOLDER
-from .utils import data_directory_is_empty, get_major_version, parse_int, split_host_port, SyncCrossSiteMode
+from .utils import data_directory_is_empty, get_major_version, parse_bool, \
+    parse_int, parse_real, split_host_port, SyncCrossSiteMode
 
 # Additional parameters to fine-tune validation process
 _validation_params: Dict[str, Any] = {}
@@ -976,6 +977,15 @@ def validate_sync_cross_site(value: Any) -> None:
     assert_(value in [a.value for a in SyncCrossSiteMode.__members__.values()])
 
 
+def validate_synchronous_mode(value: Any) -> None:
+    """Validate ``synchronous_mode`` configuration option.
+
+    :param value: value of ``synchronous_mode`` to be validated.
+    """
+    assert_(isinstance(value, str) and value.lower() == "quorum" or parse_bool(value) is not None,
+            "invalid value for synchronous_mode")
+
+
 def validate_name(value: Any) -> None:
     """Validate ``name`` configuration option.
 
@@ -998,6 +1008,49 @@ def validate_site(value: Any) -> None:
     """
     if not value:
         raise ConfigParseError("Site value can't be empty")
+
+
+class RealValidator(object):
+    """Validate a real (float) setting.
+
+    :ivar min: minimum allowed value for the setting, if any.
+    :ivar max: maximum allowed value for the setting, if any.
+    :ivar exclusive_min: if ``True``, *min* is an exclusive bound (``value > min`` instead of ``value >= min``).
+    :ivar raise_assert: if an ``assert`` test should be performed regarding expected type and valid range.
+    """
+
+    def __init__(self, *, min: OptionalType[float] = None, max: OptionalType[float] = None,
+                 exclusive_min: bool = False, raise_assert: bool = False) -> None:
+        """Create a :class:`RealValidator` object with the given rules.
+
+        :param min: minimum allowed value for the setting, if any.
+        :param max: maximum allowed value for the setting, if any.
+        :param exclusive_min: if ``True``, *min* is an exclusive bound.
+        :param raise_assert: if an ``assert`` test should be performed regarding expected type and valid range.
+        """
+        self.min = min
+        self.max = max
+        self.exclusive_min = exclusive_min
+        self.raise_assert = raise_assert
+
+    def __call__(self, value: Any) -> bool:
+        """Check if *value* is a valid real number within the expected range.
+
+        .. note::
+            If ``raise_assert`` is ``True`` and *value* is not valid, then an :class:`AssertionError` will be triggered.
+
+        :param value: value to be checked against the rules defined for this :class:`RealValidator` instance.
+
+        :returns: ``True`` if *value* is valid and within the expected range.
+        """
+        value = parse_real(value)
+        ret = isinstance(value, float)\
+            and (self.min is None or (value > self.min if self.exclusive_min else value >= self.min))\
+            and (self.max is None or value <= self.max)
+
+        if self.raise_assert:
+            assert_(ret)
+        return ret
 
 
 userattributes = {"username": "", Optional("password"): ""}
@@ -1120,7 +1173,7 @@ schema = Schema({
                 Optional("archive_cleanup_command"): str,
                 Optional("recovery_min_apply_delay"): str
             },
-            Optional("synchronous_mode"): bool,
+            Optional("synchronous_mode"): validate_synchronous_mode,
             Optional("synchronous_mode_strict"): bool,
             Optional("synchronous_cross_site"): validate_sync_cross_site,
             Optional("synchronous_node_count"): IntValidator(min=1, raise_assert=True),
@@ -1162,7 +1215,13 @@ schema = Schema({
             Optional("bind_addr"): validate_host_port_listen,
             "partner_addrs": validate_host_port_list,
             Optional("data_dir"): str,
-            Optional("password"): str
+            Optional("password"): str,
+            Optional("min_timeout"): RealValidator(min=0, exclusive_min=True, raise_assert=True),
+            Optional("max_timeout"): RealValidator(min=0, exclusive_min=True, raise_assert=True),
+            Optional("connection_timeout"): RealValidator(min=0, exclusive_min=True, raise_assert=True),
+            Optional("append_entries_period"): RealValidator(min=0, exclusive_min=True, raise_assert=True),
+            Optional("connection_retry_time"): RealValidator(min=0, raise_assert=True),
+            Optional("leader_fallback_timeout"): RealValidator(min=0, exclusive_min=True, raise_assert=True),
         },
         "zookeeper": {
             "hosts": Or(comma_separated_host_port, [validate_host_port]),

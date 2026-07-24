@@ -166,7 +166,6 @@ class RestApiHandler(BaseHTTPRequestHandler):
         :param headers: dictionary of additional HTTP headers to set for the response. Each key is the header name, and
             the corresponding value is the value for the header in the response.
         """
-        # TODO: try-catch ConnectionResetError: [Errno 104] Connection reset by peer and log it in DEBUG level
         self.send_response(status_code)
         headers = headers or {}
         if content_type:
@@ -619,6 +618,8 @@ class RestApiHandler(BaseHTTPRequestHandler):
             * ``patroni_failsafe_mode_is_active``: ``1`` if ``failsafe_mode`` is currently active, else ``0``;
             * ``patroni_failsafe_mode_enabled``: ``1`` if ``failsafe_mode`` is enabled in configuration, else ``0``;
             * ``patroni_failsafe_member``: ``1`` if this node is a member of failsafe topology, else ``0``;
+            * ``patroni_failover_priority``: failover priority of this node (``0`` if ``nofailover`` is set, else value
+              of ``failover_priority`` tag, defaulting to ``1``);
             * ``patroni_postgres_timeline``: PostgreSQL timeline based on current WAL file name;
             * ``patroni_dcs_last_seen``: epoch timestamp when DCS was last contacted successfully;
             * ``patroni_pending_restart``: ``1`` if this PostgreSQL node is pending a restart, else ``0``;
@@ -717,7 +718,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
 
         metrics.append("# HELP patroni_postgres_server_version Version of Postgres (if running), 0 otherwise.")
         metrics.append("# TYPE patroni_postgres_server_version gauge")
-        metrics.append("patroni_postgres_server_version {0} {1}".format(labels, postgres.get('server_version', 0)))
+        metrics.append("patroni_postgres_server_version{0} {1}".format(labels, postgres.get('server_version', 0)))
 
         metrics.append("# HELP patroni_cluster_unlocked Value is 1 if the cluster is unlocked, 0 if locked.")
         metrics.append("# TYPE patroni_cluster_unlocked gauge")
@@ -739,7 +740,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
         metrics.append("patroni_failsafe_member{0} {1}".format(labels, int(is_failsafe_member)))
 
         metrics.append("# HELP patroni_postgres_timeline Postgres timeline of this node (if running), 0 otherwise.")
-        metrics.append("# TYPE patroni_postgres_timeline counter")
+        metrics.append("# TYPE patroni_postgres_timeline gauge")
         metrics.append("patroni_postgres_timeline{0} {1}".format(labels, postgres.get('timeline') or 0))
 
         metrics.append("# HELP patroni_dcs_last_seen Epoch timestamp when DCS was last contacted successfully"
@@ -764,6 +765,10 @@ class RestApiHandler(BaseHTTPRequestHandler):
         current_state = postgres['state']
         state_value = current_state.index if isinstance(current_state, PostgresqlState) else -1
         metrics.append(f"patroni_postgres_state{labels} {state_value}")
+
+        metrics.append("# HELP patroni_failover_priority Failover priority of this node.")
+        metrics.append("# TYPE patroni_failover_priority gauge")
+        metrics.append("patroni_failover_priority{0} {1}".format(labels, patroni.failover_priority))
 
         self.write_response(200, '\n'.join(metrics) + '\n', content_type='text/plain')
 
@@ -1846,12 +1851,43 @@ class RestApiServer(ThreadingMixIn, HTTPServer):
         if hasattr(request, 'context'):  # SSLSocket
             from ssl import SSLSocket
             if isinstance(request, SSLSocket):  # pyright
-                request.do_handshake()
+                try:
+                    request.do_handshake()
+                except OSError as e:
+                    # The client may reset the connection (or otherwise fail the TLS handshake, e.g.
+                    # ssl.SSLError or a timeout -- all OSError subclasses) before we even start handling
+                    # the request. In that case the parent process_request_thread(), which is responsible
+                    # for closing the socket, is never reached, so we shut the request down ourselves and
+                    # log at DEBUG instead of leaking it.
+                    logger.debug('Connection from %s:%s was reset during the SSL handshake: %r',
+                                 client_address[0], client_address[1], e)
+                    self.shutdown_request(request)
+                    return
         super(RestApiServer, self).process_request_thread(request, client_address)
 
     def process_request(self, request: Union[socket.socket, Tuple[bytes, socket.socket]],
                         client_address: Tuple[str, int]) -> None:
         self._executor.submit(self.process_request_thread, request, client_address)
+
+    def finish_request(self, request: Union[socket.socket, Tuple[bytes, socket.socket]],
+                       client_address: Tuple[str, int]) -> None:
+        """Finish one request by instantiating the request handler class.
+
+        Wrapper for :func:`~socketserver.BaseServer.finish_request` that intercepts :class:`OSError`
+        exceptions raised while handling the request. A client (typically a load-balancer performing
+        health-checks) may drop the connection before Patroni is done writing the response -- a
+        connection reset or broken pipe on a plain socket, or an :class:`ssl.SSLError` on a TLS one
+        (all :class:`OSError` subclasses). There is nothing we can do about it, and it is not worth
+        letting it propagate to :func:`handle_error`, which would pollute the log with a WARNING and a
+        stack trace, so we just log it at the DEBUG level.
+
+        :param request: socket to handle the client request.
+        :param client_address: tuple containing the client IP and port.
+        """
+        try:
+            super(RestApiServer, self).finish_request(request, client_address)
+        except OSError as e:
+            logger.debug('Connection from %s:%s was reset: %r', client_address[0], client_address[1], e)
 
     def shutdown(self) -> None:
         super(RestApiServer, self).shutdown()
