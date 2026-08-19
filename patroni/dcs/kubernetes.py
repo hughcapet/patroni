@@ -21,12 +21,13 @@ import yaml
 
 from urllib3.exceptions import HTTPError
 
+from .. import global_config
 from ..collections import EMPTY_DICT
 from ..exceptions import DCSError
 from ..postgresql.misc import PostgresqlRole, PostgresqlState
 from ..postgresql.mpp import AbstractMPP
-from ..utils import deep_compare, iter_response_objects, \
-    keepalive_socket_options, Retry, RetryFailedError, tzutc, uri, USER_AGENT
+from ..utils import deep_compare, iter_response_objects, keepalive_socket_options, \
+    Retry, RetryFailedError, SyncCrossSiteMode, tzutc, uri, USER_AGENT
 from . import AbstractDCS, Cluster, ClusterConfig, Failover, Leader, Member, Status, SyncState, TimelineHistory
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -1257,7 +1258,8 @@ class Kubernetes(AbstractDCS):
         leader_observed_record = kind_annotations or self._leader_observed_record
         annotations = {self._LEADER: self._name, 'ttl': str(self._ttl), 'renewTime': now,
                        'acquireTime': leader_observed_record.get('acquireTime') or now,
-                       'transitions': leader_observed_record.get('transitions') or '0'}
+                       'transitions': leader_observed_record.get('transitions') or '0',
+                       'current_site': self.site}
         if last_lsn:
             annotations[self._OPTIME] = str(last_lsn)
             annotations['slots'] = json.dumps(slots, separators=(',', ':')) if slots else None
@@ -1346,10 +1348,11 @@ class Kubernetes(AbstractDCS):
         """Unused"""
         raise NotImplementedError  # pragma: no cover
 
-    def manual_failover(self, leader: Optional[str], candidate: Optional[str],
-                        scheduled_at: Optional[datetime.datetime] = None, version: Optional[str] = None) -> bool:
+    def manual_failover(self, leader: Optional[str], candidate: Optional[str], site: Optional[str],
+                        scheduled_at: Optional[datetime.datetime] = None, version: Optional[str] = None
+                        ) -> bool:
         annotations = {'leader': leader or None, 'member': candidate or None,
-                       'scheduled_at': scheduled_at and scheduled_at.isoformat()}
+                       'scheduled_at': scheduled_at and scheduled_at.isoformat(), 'site': site or None}
         patch = bool(self.cluster and isinstance(self.cluster.failover, Failover) and self.cluster.failover.version)
         return bool(self.patch_or_create(self.failover_path, annotations, version, bool(version or patch), False))
 
@@ -1439,6 +1442,15 @@ class Kubernetes(AbstractDCS):
         """Unused"""
         raise NotImplementedError  # pragma: no cover
 
+    def _write_sync_state(self, leader: Optional[str], sync_standby: Optional[Collection[str]],
+                          quorum: Optional[int], cross_site_mode: Optional[SyncCrossSiteMode],
+                          version: Optional[str] = None) -> Optional[SyncState]:
+        sync_state = self.sync_state(leader, sync_standby, quorum, cross_site_mode)
+        sync_state['quorum'] = str(sync_state['quorum']) if sync_state['quorum'] is not None else None
+        ret = self.patch_or_create(self.sync_path, sync_state, version, False)
+        if not isinstance(ret, bool):
+            return SyncState.from_node(ret.metadata.resource_version, sync_state)
+
     def write_sync_state(self, leader: Optional[str], sync_standby: Optional[Collection[str]],
                          quorum: Optional[int], version: Optional[str] = None) -> Optional[SyncState]:
         """Prepare and write annotations to $SCOPE-sync Endpoint or ConfigMap.
@@ -1450,11 +1462,7 @@ class Kubernetes(AbstractDCS):
         :param version: last known `resource_version` for conditional update of the object
         :returns: the new :class:`SyncState` object or None
         """
-        sync_state = self.sync_state(leader, sync_standby, quorum)
-        sync_state['quorum'] = str(sync_state['quorum']) if sync_state['quorum'] is not None else None
-        ret = self.patch_or_create(self.sync_path, sync_state, version, False)
-        if not isinstance(ret, bool):
-            return SyncState.from_node(ret.metadata.resource_version, sync_state)
+        return self._write_sync_state(leader, sync_standby, quorum, global_config.sync_cross_site_mode, version)
 
     def delete_sync_state(self, version: Optional[str] = None) -> bool:
         """Patch annotations of $SCOPE-sync Endpoint or ConfigMap with empty values.
@@ -1463,7 +1471,7 @@ class Kubernetes(AbstractDCS):
         :param version: last known `resource_version` for conditional update of the object
         :returns: `True` if "delete" was successful
         """
-        return self.write_sync_state(None, None, None, version=version) is not None
+        return self._write_sync_state(None, None, None, None, version=version) is not None
 
     def watch(self, leader_version: Optional[str], timeout: float) -> bool:
         if self.__do_not_watch:

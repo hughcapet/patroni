@@ -156,12 +156,14 @@ class MockLogger(object):
 class MockPatroni(object):
 
     ha = MockHa()
+    site = 'dc1'
     postgresql = ha.state_handler
     dcs = Mock()
     logger = MockLogger()
     tags = {"key1": True, "key2": False, "key3": 1, "key4": 1.4, "key5": "RandomTag"}
     version = '0.00'
     noloadbalance = PropertyMock(return_value=False)
+    failover_priority = 1
     scheduled_restart = {'schedule': future_restart_time,
                          'postmaster_start_time': postgresql.postmaster_start_time()}
 
@@ -726,12 +728,35 @@ class TestRestApiHandler(unittest.TestCase):
             response_mock.assert_called_with(
                 422, 'Unable to parse scheduled timestamp. It should be in an unambiguous format, e.g. ISO 8601')
 
+        # [Multi-site switchover]
+
+        # site and candidate
+        request = post + '114\n\n{"leader": "postgresql1", "candidate": "postgresql2", "site": "dc1"}'
+        with patch.object(RestApiHandler, 'write_response') as response_mock:
+            MockRestApiServer(RestApiHandler, request)
+            dcs.manual_failover.assert_called_with('postgresql1', 'postgresql2', scheduled_at=None, site=None)
+
+        # no members in site
+        request = post + '53\n\n{"leader": "postgresql1", "site": "dc1"}'
+        with patch.object(RestApiHandler, 'write_response') as response_mock:
+            MockRestApiServer(RestApiHandler, request)
+            response_mock.assert_called_with(412, 'switchover is not possible: can not find members in site dc1')
+
+            cluster.members = [Member(0, 'postgresql0', 30, {'api_url': 'http', 'site': 'dc1'}),
+                               Member(0, 'postgresql2', 30, {'api_url': 'http'})]
+            cluster2.leader.name = 'postgresql0'
+            dcs.get_cluster.side_effect = [cluster, cluster2]
+            dcs.manual_failover.return_value = True
+            MockRestApiServer(RestApiHandler, request)
+            response_mock.assert_called_with(200, 'Successfully switched over to "postgresql0"')
+
     def test_do_POST_failover(self):
         post = 'POST /failover HTTP/1.0' + self._authorization + '\nContent-Length: '
 
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '14\n\n{"leader":"1"}')
-            response_mock.assert_called_once_with(400, 'Failover could be performed only to a specific candidate')
+            response_mock.assert_called_once_with(400,
+                                                  'Failover could be performed only to a specific candidate')
 
         with patch.object(RestApiHandler, 'write_response') as response_mock:
             MockRestApiServer(RestApiHandler, post + '37\n\n{"candidate":"2","scheduled_at": "1"}')
@@ -796,6 +821,21 @@ class TestRestApiServer(unittest.TestCase):
         except Exception:
             self.assertIsNone(self.srv.handle_error(None, ('127.0.0.1', 55555)))
 
+    def test_finish_request_connection_reset(self):
+        import ssl
+
+        # A client (e.g. a load-balancer performing health-checks) may reset the connection at any
+        # point while the request is handled, not only in write_response(). finish_request() must
+        # swallow a ConnectionError (plain HTTP) or ssl.SSLError (TLS) raised anywhere during handling
+        # and log it at DEBUG, instead of letting it propagate to handle_error() as a WARNING.
+        for exc in (ConnectionResetError(104, 'Connection reset by peer'), ssl.SSLError('reset')):
+            self.srv.RequestHandlerClass = Mock(side_effect=exc)
+            with patch('patroni.api.logger.debug') as mock_debug:
+                self.assertIsNone(self.srv.finish_request(Mock(), ('127.0.0.1', 55555)))
+            self.srv.RequestHandlerClass.assert_called_once()
+            mock_debug.assert_called_once()
+            self.assertIn('was reset', mock_debug.call_args[0][0])
+
     @patch.object(HTTPServer, '__init__', Mock(side_effect=socket.error))
     def test_socket_error(self):
         self.assertRaises(socket.error, MockRestApiServer, Mock(), '', {'listen': '*:8008'})
@@ -816,6 +856,26 @@ class TestRestApiServer(unittest.TestCase):
     def test_process_request(self):
         with patch.object(self.srv._executor, 'submit', lambda f, r, c: f(r, c)):
             self.srv.process_request(self.__create_socket(), ('2', 54321))
+
+    def test_process_request_thread_ssl_handshake_reset(self):
+        import ssl
+
+        # A reset/failed TLS handshake (ssl.SSLError, a connection reset, or a timeout -- all OSError
+        # subclasses) happens before the parent process_request_thread() (which is responsible for
+        # closing the socket) is reached, so process_request_thread() must shut the request down
+        # itself, log at DEBUG, and not proceed to handle the request.
+        sock = self.__create_socket()
+        if not isinstance(sock, ssl.SSLSocket):  # pragma: no cover - ssl not available
+            self.skipTest('ssl is not available')
+        for exc in (ssl.SSLError('handshake reset'), TimeoutError(), ConnectionResetError(104, 'reset')):
+            sock.do_handshake = Mock(side_effect=exc)
+            with patch.object(self.srv, 'shutdown_request') as mock_shutdown, \
+                    patch.object(RestApiServer, 'finish_request') as mock_finish, \
+                    patch('patroni.api.logger.debug') as mock_debug:
+                self.assertIsNone(self.srv.process_request_thread(sock, ('127.0.0.1', 55555)))
+            mock_finish.assert_not_called()
+            mock_shutdown.assert_called_once_with(sock)
+            self.assertTrue(any('SSL handshake' in c[0][0] for c in mock_debug.call_args_list if c[0]))
 
     @patch.object(MockRestApiServer, 'process_request', Mock(side_effect=RuntimeError))
     @patch.object(MockRestApiServer, 'get_request')

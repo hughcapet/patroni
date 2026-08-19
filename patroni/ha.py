@@ -22,7 +22,7 @@ from .postgresql.postmaster import PostmasterProcess
 from .postgresql.rewind import Rewind
 from .quorum import QuorumStateResolver
 from .tags import Tags
-from .utils import parse_int, polling_loop, tzutc
+from .utils import parse_int, polling_loop, SyncCrossSiteMode, tzutc
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +455,10 @@ class Ha(object):
                 'version': self.patroni.version
             }
 
+            site = self.patroni.site
+            if site:
+                data['site'] = site
+
             proxy_url = self.state_handler.proxy_url
             if proxy_url:
                 data['proxy_url'] = proxy_url
@@ -554,7 +558,7 @@ class Ha(object):
             else:
                 return 'failed to acquire initialize lock'
 
-        clone_member = self.cluster.get_clone_member(self.state_handler.name)
+        clone_member = self.cluster.get_clone_member(self.state_handler.name, self.patroni.site)
         # cluster already has a leader, we can bootstrap from it or from one of replicas (if they allow)
         if not self.cluster.is_unlocked() and clone_member:
             member_role = 'leader' if clone_member == self.cluster.leader else 'replica'
@@ -777,10 +781,9 @@ class Ha(object):
                 self.state_handler.get_history(self._leader_timeline + 1):
             self._rewind.trigger_check_diverged_lsn()
 
-        if not self.state_handler.is_starting():
-            msg = self._handle_rewind_or_reinitialize()
-            if msg:
-                return msg
+        msg = self._handle_rewind_or_reinitialize()
+        if msg:
+            return msg
 
         if not self.is_paused():
             self.state_handler.handle_parameter_change()
@@ -808,10 +811,9 @@ class Ha(object):
 
                 if self._last_timeline and self._leader_timeline and self._last_timeline < self._leader_timeline:
                     self._rewind.trigger_check_diverged_lsn()
-                    if not self.state_handler.is_starting():
-                        msg = self._handle_rewind_or_reinitialize()
-                        if msg:
-                            return msg
+                    msg = self._handle_rewind_or_reinitialize()
+                    if msg:
+                        return msg
 
         return follow_reason
 
@@ -884,20 +886,26 @@ class Ha(object):
             quorum = dcs_state.quorum if self.quorum_commit_mode_is_active() else 0
             voters = CaseInsensitiveSet(dcs_state.voters)
             numsync = max(global_config.min_synchronous_nodes, len(voters) - quorum)
+            current_cross_site_mode = global_config.sync_cross_site_mode
 
-            msg = ''
+            msg = site_msg = ''
             if voters != replication_state.sync or \
                     numsync != replication_state.numsync or \
                     sync_type != replication_state.sync_type:
                 self.state_handler.sync_handler.set_synchronous_standby_names(voters, numsync)
+            elif current_cross_site_mode != dcs_state.cross_site_mode and \
+                    current_cross_site_mode in (SyncCrossSiteMode.LOCAL_ONLY, SyncCrossSiteMode.REMOTE_ONLY):
+                self.dcs.write_sync_state(dcs_state.leader, CaseInsensitiveSet(), quorum, version=dcs_state.version)
+                self.state_handler.sync_handler.set_synchronous_standby_names(CaseInsensitiveSet(), numsync)
+                site_msg = 'that satisfy current synchronous_cross_site configuration '
             elif voters:
                 msg = 'Continue using old value of synchronous_standby_names="{0}". '.format(
                     self.state_handler.synchronous_standby_names())
 
             # We use self._synchronous_strict_mode_activated to show warning only once.
             if not self._synchronous_strict_mode_activated:
-                logger.warning('No active replication connections from Patroni members and '
-                               'synchronous_mode_strict is requested. %sCommits will be delayed.', msg)
+                logger.warning('No active replication connections from Patroni members %sand '
+                               'synchronous_mode_strict is requested. %sCommits will be delayed.', site_msg, msg)
 
             self._synchronous_strict_mode_activated = True
         else:
@@ -1420,6 +1428,8 @@ class Ha(object):
         else:
             leader_name = leader and leader.name
 
+        current_site = self.cluster.status.current_site
+        eligible_members: List[_MemberStatus] = []
         for st in self.fetch_nodes_statuses(members):
             if st.failover_limitation() is None:
                 if st.in_recovery is False:
@@ -1435,24 +1445,45 @@ class Ha(object):
                     logger.info('Ignoring the former leader being ahead of us')
                 elif st.wal_position > 0:  # we want to count votes only from nodes with postgres up and running!
                     quorum_vote = st.member.name in voting_set
-                    low_priority = my_wal_position == st.wal_position \
-                        and self.patroni.failover_priority < st.failover_priority
-
-                    if low_priority and leader_name and leader_name == st.member.name:
-                        logger.info('Ignoring former leader %s having priority %s higher than this nodes %s priority',
-                                    leader_name, st.failover_priority, self.patroni.failover_priority)
-                        low_priority = False
-
-                    if low_priority and (not self.quorum_commit_mode_is_active() or quorum_vote):
-                        # There's a higher priority non-lagging replica
-                        logger.info(
-                            '%s has equally tolerable WAL position and priority %s, while this node has priority %s',
-                            st.member.name, st.failover_priority, self.patroni.failover_priority)
-                        return False
-
                     if quorum_vote:
                         logger.info('Got quorum vote from %s', st.member.name)
                         quorum_votes += 1
+                    if my_wal_position == st.wal_position:
+                        eligible_members.append(st)
+
+        action = self._get_failover_action_name()
+        if self.cluster.failover and self.cluster.failover.site:
+            eligible_members = [st for st in eligible_members if st.data.get('site') == self.cluster.failover.site]
+            if eligible_members and self.patroni.site != self.cluster.failover.site:
+                logger.info('%s to the requested site %s is possible, while my site is %s',
+                            action.capitalize(), self.cluster.failover.site, self.patroni.site)
+                return False
+        elif current_site:
+            current_site_eligible = [st for st in eligible_members if st.data.get('site') == current_site]
+            if current_site_eligible and self.patroni.site != current_site:
+                logger.info('Local %s in the current site %s is possible, while my site is %s',
+                            action, current_site, self.patroni.site)
+                return False
+            elif self.patroni.site == current_site:
+                eligible_members = current_site_eligible
+            else:
+                logger.info('No members in the curent site. Performing cross-site %s', action)
+
+        for st in eligible_members:
+            low_priority = my_wal_position == st.wal_position \
+                and self.patroni.failover_priority < st.failover_priority
+
+            if low_priority and leader_name and leader_name == st.member.name:
+                logger.info('Ignoring former leader %s having priority %s higher than this nodes %s priority',
+                            leader_name, st.failover_priority, self.patroni.failover_priority)
+                low_priority = False
+
+            if low_priority and (not self.quorum_commit_mode_is_active() or st.member.name in voting_set):
+                # There's a higher priority non-lagging replica
+                logger.info(
+                    '%s has equally tolerable WAL position and priority %s, while this node has priority %s',
+                    st.member.name, st.failover_priority, self.patroni.failover_priority)
+                return False
 
         # When not in quorum commit we just want to return `True`.
         # In quorum commit the former leader is special and counted healthy even when there are no other nodes.
@@ -1523,7 +1554,7 @@ class Ha(object):
                 if not self.cluster.get_member(failover.candidate, fallback_to_leader=False)\
                         and self.state_handler.is_primary():
                     logger.warning("%s: removing failover key because failover candidate is not running", action)
-                    self.dcs.manual_failover('', '', version=failover.version)
+                    self.dcs.manual_failover('', '', '', version=failover.version)
                     return None
                 return False
 
@@ -1548,6 +1579,12 @@ class Ha(object):
             # i.e. we assume that failover.candidate is None
         elif self.is_paused():
             return False
+        elif failover.site:
+            # in synchronous mode (except quorum commit!) when our name is not in the
+            # /sync key we shouldn't take any action even if the candidate is unhealthy
+            if self.is_synchronous_mode() and not self.is_quorum_commit_mode()\
+                    and not self.cluster.sync.matches(self.state_handler.name, True):
+                return False
 
         # try to pick some other members for switchover and check that they are healthy
         if failover.leader:
@@ -1825,7 +1862,7 @@ class Ha(object):
         # it is not the time for the scheduled switchover yet, do nothing
         if (failover.scheduled_at and not
             self.should_run_scheduled_action(bare_action, failover.scheduled_at, lambda:
-                                             self.dcs.manual_failover('', '', version=failover.version))):
+                                             self.dcs.manual_failover('', '', '', version=failover.version))):
             return
 
         if not failover.leader or failover.leader == self.state_handler.name:
@@ -1844,14 +1881,14 @@ class Ha(object):
             logger.warning('%s: leader name does not match: %s != %s', action, failover.leader, self.state_handler.name)
 
         logger.info('Cleaning up failover key')
-        self.dcs.manual_failover('', '', version=failover.version)
+        self.dcs.manual_failover('', '', '', version=failover.version)
 
     def process_unhealthy_cluster(self) -> str:
         """Cluster has no leader key"""
         # First, we want to handle primary_race_backoff. Do it only for non-standby cluster,
         # not in maintenance mode and when there is no manual failover/switchover in progress.
         if not self.is_paused() and not self.is_standby_cluster() and \
-                not (self.cluster.failover and self.cluster.failover.candidate) and \
+                not (self.cluster.failover and (self.cluster.failover.candidate or self.cluster.failover.site)) and \
                 global_config.primary_race_backoff > 0 and self._prev_wal_lsn is not None:
             if self._primary_race_backoff_timestamp == 0:
                 self._primary_race_backoff_timestamp = time.time()
@@ -1869,12 +1906,13 @@ class Ha(object):
             if self.acquire_lock():
                 failover = self.cluster.failover
                 if failover:
-                    if self.is_paused() and failover.leader and failover.candidate:
+                    if self.is_paused() and failover.leader and (failover.candidate or failover.site):
                         logger.info('Updating failover key after acquiring leader lock...')
-                        self.dcs.manual_failover('', failover.candidate, failover.scheduled_at, failover.version)
+                        self.dcs.manual_failover('', failover.candidate, failover.site, failover.scheduled_at,
+                                                 failover.version)
                     else:
                         logger.info('Cleaning up failover key after acquiring leader lock...')
-                        self.dcs.manual_failover('', '')
+                        self.dcs.manual_failover('', '', '')
                 self.load_cluster_from_dcs()
 
                 if self.is_standby_cluster():
@@ -2085,7 +2123,7 @@ class Ha(object):
         if from_leader:
             clone_member = cluster.leader
         else:
-            clone_member = cluster.get_clone_member(self.state_handler.name)
+            clone_member = cluster.get_clone_member(self.state_handler.name, self.patroni.site)
 
         if clone_member:
             member_role = 'leader' if clone_member == cluster.leader else 'replica'
